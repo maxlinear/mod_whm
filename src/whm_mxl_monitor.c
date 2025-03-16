@@ -1,6 +1,6 @@
 /******************************************************************************
 
-         Copyright (c) 2023 - 2024, MaxLinear, Inc.
+         Copyright (c) 2023 - 2025 MaxLinear, Inc.
 
   This software may be distributed under the terms of the BSD license.
   See README for more details.
