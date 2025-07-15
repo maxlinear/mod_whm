@@ -26,7 +26,9 @@
 #include "wld/wld_ap_nl80211.h"
 #include "wld/wld_hostapd_ap_api.h"
 #include "wld/wld_eventing.h"
+#include "wld/Utils/wld_autoCommitMgr.h"
 
+#include "whm_mxl_module.h"
 #include "whm_mxl_utils.h"
 #include "whm_mxl_vap.h"
 #include "whm_mxl_rad.h"
@@ -34,6 +36,9 @@
 #include "whm_mxl_hostapd_cfg.h"
 #include "whm_mxl_wmm.h"
 #include "whm_mxl_mlo.h"
+#include "whm_mxl_reconfMngr.h"
+
+#define START_ENABLE_SYNC_TIMEOUT_MS 10000
 
 #define ME "mxlVap"
 
@@ -55,11 +60,32 @@ mxl_VapVendorData_t* mxl_vap_getVapVendorData(const T_AccessPoint* pAP) {
     return (mxl_VapVendorData_t*) pAP->vendorData;
 }
 
+static void s_enableSync(amxp_timer_t* timer _UNUSED, void* priv) {
+    SAH_TRACEZ_IN(ME);
+    T_AccessPoint* pAP = (T_AccessPoint*) priv;
+    ASSERT_NOT_NULL(pAP, , ME, "NULL");
+    mxl_VapVendorData_t* pVapVendorData = mxl_vap_getVapVendorData(pAP);
+    ASSERT_NOT_NULL(pVapVendorData, , ME, "pVapVendorData is NULL");
+
+    /* Check if vap on enable sync is still pending */
+    if (pVapVendorData->vapEnableReloadPending) {
+        setBitLongArray(pVapVendorData->reconfFsm.FSM_BitActionArray, FSM_BW, RECONF_FSM_RELOAD_BSS);
+        whm_mxl_reconfMngr_notifyVapCommit(pAP);
+        pVapVendorData->vapEnableReloadPending = false;
+    }
+    SAH_TRACEZ_OUT(ME);
+}
+
 static void s_mxl_vap_init_vendordata(T_AccessPoint* pAP) {
     ASSERT_NOT_NULL(pAP, , ME, "pAP is NULL");
     /* Add desired initializations here*/
     mxl_VapVendorData_t* mxlVapVendorData = mxl_vap_getVapVendorData(pAP);
     mxlVapVendorData->mloId = -1;
+    mxlVapVendorData->MLO_destroyInProgress = 0;
+    mxlVapVendorData->saeExtKey = 0;
+    mxlVapVendorData->EnableWPA3PersonalCompatibility = 0;
+    /* Init VAP enable sync timer */
+    amxp_timer_new(&mxlVapVendorData->onVapEnableSyncTimer, s_enableSync, pAP);
     return;
 }
 
@@ -81,6 +107,16 @@ static wld_event_callback_t s_mxlWdsInterfaceChange = {
     .callback = (wld_event_callback_fun) s_mxlWdsIfaceChangeCb,
 };
 
+void whm_mxl_registerToWdsEvent(void) {
+    /* Register to wds interface change events */
+    wld_event_add_callback(gWld_queue_wdsInterface, &s_mxlWdsInterfaceChange);
+}
+
+void whm_mxl_unregisterToWdsEvent(void) {
+    /* Unregister to wds interface change events */
+    wld_event_remove_callback(gWld_queue_wdsInterface, &s_mxlWdsInterfaceChange);
+}
+
 int whm_mxl_vap_createHook(T_AccessPoint* pAP) {
     ASSERT_NOT_NULL(pAP, SWL_RC_INVALID_PARAM, ME, "pAP is NULL");
     swl_rc_ne rc = SWL_RC_OK;
@@ -91,15 +127,14 @@ int whm_mxl_vap_createHook(T_AccessPoint* pAP) {
     ASSERT_NOT_NULL(pAP->vendorData, SWL_RC_INVALID_PARAM, ME, "pAP->vendorData calloc returned NULL");
     s_mxl_vap_init_vendordata(pAP);
 
-    /* Register to wds interface change events */
-    wld_event_add_callback(gWld_queue_wdsInterface, &s_mxlWdsInterfaceChange);
+    /* Regstration to WDS events is done during Radio creation hook */
 
     return rc;
 }
 
-static void s_mxl_deinit_vendorVapData(T_AccessPoint* pAP) {
-    ASSERT_NOT_NULL(pAP, , ME, "pAP is NULL");
-    /* No implementation yet */
+static void s_mxl_deinit_vendorVapData(mxl_VapVendorData_t* mxlVapVendorData) {
+    ASSERT_NOT_NULL(mxlVapVendorData, , ME, "mxlVapVendorData is NULL");
+    amxp_timer_delete(&mxlVapVendorData->onVapEnableSyncTimer);
     return;
 }
 
@@ -109,9 +144,8 @@ void whm_mxl_vap_destroyHook(T_AccessPoint* pAP){
     CALL_NL80211_FTA(mfn_wvap_destroy_hook, pAP);
     mxlVapVendorData = mxl_vap_getVapVendorData(pAP);
     ASSERT_NOT_NULL(mxlVapVendorData, , ME, "mxlVapVendorData is NULL");
-    s_mxl_deinit_vendorVapData(pAP);
-    /* Unregister to wds interface change events */
-    wld_event_remove_callback(gWld_queue_wdsInterface, &s_mxlWdsInterfaceChange);
+    s_mxl_deinit_vendorVapData(mxlVapVendorData);
+    /* Unregister to WDS events is done during Radio destroy hook */
     free(mxlVapVendorData);
 }
 
@@ -163,8 +197,8 @@ static swl_rc_ne s_getDevDiagResults3(T_AssociatedDevice* pAD) {
     ASSERTI_TRUE(mxl_isApReadyToProcessVendorCmd(pAP), SWL_RC_INVALID_STATE, ME, "AP not ready to process Vendor cmd");
 
     // execute LTQ_NL80211_VENDOR_SUBCMD_GET_DEV_DIAG_RESULT3 to get
-    // - OperatingStandard
-    // - SignalNoiseRatio
+    // OperatingStandard, SignalNoiseRatio, TxBytes, RxBytes,
+    // TxPacketCount, RxPacketCount, Retransmissions, Tx_RetransmissionsFailed,
 
     uint32_t subcmd = LTQ_NL80211_VENDOR_SUBCMD_GET_DEV_DIAG_RESULT3;
     rc = wld_ap_nl80211_sendVendorSubCmd(pAP, OUI_MXL, subcmd, pAD->MACAddress, ETHER_ADDR_LEN,
@@ -198,6 +232,13 @@ static swl_rc_ne s_getPeerFlowStatusCb(swl_rc_ne rc, struct nlmsghdr* nlh, void*
     pAD->RxUnicastPacketCount = peerFlowStats->tr181_stats.traffic_stats.UnicastPacketsReceived;
     pAD->TxMulticastPacketCount = peerFlowStats->tr181_stats.traffic_stats.MulticastPacketsSent;
     pAD->TxUnicastPacketCount = peerFlowStats->tr181_stats.traffic_stats.UnicastPacketsSent;
+    pAD->SignalStrength = peerFlowStats->tr181_stats.SignalStrength;
+    pAD->TxBytes = peerFlowStats->tr181_stats.traffic_stats.BytesSent;
+    pAD->RxBytes = peerFlowStats->tr181_stats.traffic_stats.BytesReceived;
+    pAD->LastDataUplinkRate = peerFlowStats->tr181_stats.LastDataUplinkRate;
+    pAD->LastDataDownlinkRate = peerFlowStats->tr181_stats.LastDataDownlinkRate;
+    pAD->MaxUplinkRateSupported = SWL_MAX(pAD->MaxUplinkRateSupported, peerFlowStats->tr181_stats.LastDataUplinkRate);
+    pAD->MaxDownlinkRateSupported = SWL_MAX(pAD->MaxDownlinkRateSupported, peerFlowStats->tr181_stats.LastDataDownlinkRate);
 
     return rc;
 }
@@ -211,10 +252,8 @@ static swl_rc_ne s_getPeerFlowStatus(T_AssociatedDevice* pAD) {
     ASSERTI_TRUE(mxl_isApReadyToProcessVendorCmd(pAP), SWL_RC_INVALID_STATE, ME, "AP not ready to process Vendor cmd");
 
     // execute LTQ_NL80211_VENDOR_SUBCMD_GET_PEER_FLOW_STATUS to get
-    // - Rx_Retransmissions
-    // - RxUnicastPacketCount
-    // - TxMulticastPacketCount
-    // - TxUnicastPacketCount
+    // Rx_Retransmissions, RxUnicastPacketCount, TxMulticastPacketCount,
+    // TxUnicastPacketCount, SignalStrength
 
     uint32_t subcmd = LTQ_NL80211_VENDOR_SUBCMD_GET_PEER_FLOW_STATUS;
     rc = wld_ap_nl80211_sendVendorSubCmd(pAP, OUI_MXL, subcmd, pAD->MACAddress, ETHER_ADDR_LEN,
@@ -347,6 +386,33 @@ static void s_enableDummyVap(T_Radio* pRad, int enable) {
     dumVap->pSSID->enable = dumVap->enable;
 }
 
+static void s_startSyncOnEnable(T_AccessPoint* pAP) {
+    ASSERT_NOT_NULL(pAP, , ME, "NULL");
+    T_Radio* pRad = (T_Radio*) pAP->pRadio;
+    ASSERT_NOT_NULL(pRad, , ME, "pSSID is NULL");
+    /* Start sync enable timer only when hostapd is enabled */
+    ASSERT_TRUE(wld_secDmn_isEnabled(pRad->hostapd), , ME, "%s: secDmn not enabled", pAP->alias);
+    mxl_VapVendorData_t* pVapVendorData = mxl_vap_getVapVendorData(pAP);
+    ASSERT_NOT_NULL(pVapVendorData, , ME, "pVapVendorData is NULL");
+    swl_chanspec_t chanspec = wld_rad_getSwlChanspec(pRad);
+    uint32_t timeout = START_ENABLE_SYNC_TIMEOUT_MS;
+
+    if (pRad->detailedState == CM_RAD_FG_CAC) {
+        /* Extend timeout due to radio now in FG CAC clearing */
+        timeout += wld_channel_get_band_clear_time(chanspec);
+    }
+
+    if (pAP->enable) {
+        amxp_timer_state_t state = amxp_timer_get_state(pVapVendorData->onVapEnableSyncTimer);
+        if ((state == amxp_timer_started ) || (state == amxp_timer_running)) {
+            amxp_timer_stop(pVapVendorData->onVapEnableSyncTimer);
+        }
+        SAH_TRACEZ_INFO(ME, "%s: starting enable sync timer (timeout %u)", pAP->alias, timeout);
+        amxp_timer_start(pVapVendorData->onVapEnableSyncTimer, timeout);
+        pVapVendorData->vapEnableReloadPending = true;
+    }
+}
+
 int whm_mxl_vap_enable(T_AccessPoint* pAP, int enable, int set) {
     int ret;
     SAH_TRACEZ_WARNING(ME, "%s: vap enable %d --> %d - Set:%d", pAP->alias, pAP->enable, enable, set);
@@ -371,6 +437,10 @@ int whm_mxl_vap_enable(T_AccessPoint* pAP, int enable, int set) {
                 SAH_TRACEZ_WARNING(ME, "%s: set background DFS available", pRad->Name);
                 wld_bgdfs_setAvailable(pRad, true);
             }
+        }
+        /* When VAP is enabled dynamically - start sync enable timer and set reload pending */
+        if (!(set & DIRECT)) {
+            s_startSyncOnEnable(pAP);
         }
     }
     return ret;
@@ -419,6 +489,17 @@ int whm_mxl_vap_bssid(T_Radio* pR, T_AccessPoint* pAP, unsigned char* buf, int b
     return rc;
 }
 
+int whm_mxl_vap_sec_sync(T_AccessPoint* pAP, int set) {
+    int rc = 0;
+
+    if ((set & SET) && (whm_mxl_chooseVapConfigFlow(pAP, WHM_MXL_CONFIG_TYPE_SECURITY) == WHM_MXL_CONFIG_FLOW_RECONF)) {
+            SAH_TRACEZ_INFO(ME, "%s: Security sync requesting reconf", pAP->alias);
+            whm_mxl_vap_requestReconf(pAP);
+    } else {
+        CALL_NL80211_FTA_RET(rc, mfn_wvap_sec_sync, pAP, set);
+    }
+    return rc;
+}
 
 int whm_mxl_vap_multiap_update_type(T_AccessPoint* pAP) {
     SAH_TRACEZ_IN(ME);
@@ -630,6 +711,23 @@ amxd_status_t _whm_mxl_vap_validateOweTransSsid_pvf(amxd_object_t* object _UNUSE
     return status;
 }
 
+amxd_status_t _whm_mxl_vap_validateRadiusSecret_pvf(amxd_object_t* object _UNUSED,
+                                            amxd_param_t* param _UNUSED,
+                                            amxd_action_t reason _UNUSED,
+                                            const amxc_var_t* const args,
+                                            amxc_var_t* const retval _UNUSED,
+                                            void* priv _UNUSED) {
+    amxd_status_t status = amxd_status_invalid_value;
+    char* newRadiusSecret = amxc_var_dyncast(cstring_t, args);
+    if (swl_str_isEmpty(newRadiusSecret) || ((strlen(newRadiusSecret) <= 64) && (strlen(newRadiusSecret) >= 8))) {
+        status = amxd_status_ok;
+    } else {
+        SAH_TRACEZ_ERROR(ME, "invalid Radius Secret Key(%s)", newRadiusSecret);
+    }
+    free(newRadiusSecret);
+    return status;
+}
+
 static void s_setUnsolBcastPrbRespInterval_pwf(void* priv _UNUSED, amxd_object_t* object, amxd_param_t* param, const amxc_var_t* const newParamValues) {
     SAH_TRACEZ_IN(ME);
     /* WiFi.AccessPoint.{}.Vendor */
@@ -837,6 +935,17 @@ static void s_setDisableBeaconProtection_pwf(void* priv _UNUSED, amxd_object_t* 
     SAH_TRACEZ_OUT(ME);
 }
 
+static void s_setDisablePbac_pwf(void* priv _UNUSED, amxd_object_t* object, amxd_param_t* param, const amxc_var_t* const newParamValues) {
+    SAH_TRACEZ_IN(ME);
+    /* WiFi.AccessPoint.{}.Vendor */
+    amxd_object_t* vapObj = amxd_object_get_parent(object);
+    T_AccessPoint* pAP = wld_ap_fromObj(vapObj);
+    ASSERT_NOT_NULL(pAP, , ME, "No AccessPoint Mapped");
+    bool disablePbac = amxc_var_dyncast(bool, newParamValues);
+    whm_mxl_determineVapParamAction(pAP, amxd_param_get_name(param), (disablePbac ? "1" : "0"));
+    SAH_TRACEZ_OUT(ME);
+}
+
 static void s_setBridgeMode_pwf(void* priv _UNUSED, amxd_object_t* object, amxd_param_t* param, const amxc_var_t* const newParamValues) {
     SAH_TRACEZ_IN(ME);
     /* WiFi.AccessPoint.{}.Vendor */
@@ -845,6 +954,192 @@ static void s_setBridgeMode_pwf(void* priv _UNUSED, amxd_object_t* object, amxd_
     ASSERT_NOT_NULL(pAP, , ME, "No AccessPoint Mapped");
     bool setBridgeModeNewVal = amxc_var_dyncast(bool, newParamValues);
     whm_mxl_determineVapParamAction(pAP, amxd_param_get_name(param), (setBridgeModeNewVal ? "1" : "0"));
+    SAH_TRACEZ_OUT(ME);
+}
+
+static void s_setMboCellAware_pwf(void* priv _UNUSED, amxd_object_t* object, amxd_param_t* param, const amxc_var_t* const newParamValues){
+    SAH_TRACEZ_IN(ME);
+    /* WiFi.AccessPoint.{}.Vendor */
+    amxd_object_t* vapObj = amxd_object_get_parent(object);
+    T_AccessPoint* pAP = wld_ap_fromObj(vapObj);
+    ASSERT_NOT_NULL(pAP, , ME, "No AccessPoint Mapped");
+    int paramValue = amxc_var_dyncast(int32_t, newParamValues);
+
+    char MboCellAwareStr[MAX_NUM_OF_DIGITS] = {0};
+
+    swl_str_catFormat(MboCellAwareStr, sizeof(MboCellAwareStr), "%d", paramValue);
+    whm_mxl_determineVapParamAction(pAP, amxd_param_get_name(param), MboCellAwareStr);
+
+    SAH_TRACEZ_OUT(ME);
+}
+
+static void s_setSaeExtKey_pwf(void* priv _UNUSED, amxd_object_t* object, amxd_param_t* param _UNUSED, const amxc_var_t* const newParamValues) {
+    SAH_TRACEZ_IN(ME);
+    /* WiFi.AccessPoint.{}.Vendor */
+    amxd_object_t* vapObj = amxd_object_get_parent(object);
+    T_AccessPoint* pAP = wld_ap_fromObj(vapObj);
+    ASSERT_NOT_NULL(pAP, , ME, "No AccessPoint Mapped");
+    mxl_VapVendorData_t* mxlVapVendorData = mxl_vap_getVapVendorData(pAP);
+    ASSERT_NOT_NULL(mxlVapVendorData, , ME, "mxlVapVendorData is NULL");
+    bool saeExtKey = amxc_var_dyncast(bool, newParamValues);
+    mxlVapVendorData->saeExtKey = saeExtKey;
+    /* Override wpa_key_mgmt to SAE-EXT-KEY to support AKM24 */
+    whm_mxl_configureSaeExt(pAP);
+    SAH_TRACEZ_OUT(ME);
+}
+
+static void s_setEnableWPA3PersonalCompatibility_pwf(void* priv _UNUSED, amxd_object_t* object, amxd_param_t* param _UNUSED, const amxc_var_t* const newParamValues) {
+    SAH_TRACEZ_IN(ME);
+    /* WiFi.AccessPoint.{}.Vendor */
+    amxd_object_t* vapObj = amxd_object_get_parent(object);
+    T_AccessPoint* pAP = wld_ap_fromObj(vapObj);
+    ASSERT_NOT_NULL(pAP, , ME, "No AccessPoint Mapped");
+    mxl_VapVendorData_t* mxlVapVendorData = mxl_vap_getVapVendorData(pAP);
+    ASSERT_NOT_NULL(mxlVapVendorData, , ME, "mxlVapVendorData is NULL");
+    swl_rc_ne rc;
+
+    bool EnableWPA3PersonalCompatibility = amxc_var_dyncast(bool, newParamValues);
+    mxlVapVendorData->EnableWPA3PersonalCompatibility = EnableWPA3PersonalCompatibility;
+    if (EnableWPA3PersonalCompatibility == true) {
+        SAH_TRACEZ_INFO(ME, "Enabling WPA3 Personal Compatibility Mode for %s, DON'T trust security mode set in PWHM!", pAP->alias);
+        whm_mxl_toggleWPA3PersonalCompatibility(pAP);
+    } else {
+        SAH_TRACEZ_INFO(ME, "Disabling WPA3 Personal Compatibility Mode for %s, reverting back to the security mode set in PWHM!", pAP->alias);
+        CALL_NL80211_FTA_RET(rc, mfn_wvap_sec_sync, pAP, SET);
+        wld_autoCommitMgr_notifyVapEdit(pAP);
+        whm_mxl_toggleWPA3PersonalCompatibility(pAP);
+    }
+
+    SAH_TRACEZ_OUT(ME);
+}
+
+static void s_setAggrConfig_pwf(void* priv _UNUSED, amxd_object_t* object, amxd_param_t* param, const amxc_var_t* const newParamValues) {
+    SAH_TRACEZ_IN(ME);
+    /* WiFi.AccessPoint.{}.Vendor */
+    amxd_object_t* vapObj = amxd_object_get_parent(object);
+    T_AccessPoint* pAP = wld_ap_fromObj(vapObj);
+    ASSERT_NOT_NULL(pAP, , ME, "No AccessPoint Mapped");
+    mxl_VapVendorData_t* mxlVapVendorData = mxl_vap_getVapVendorData(pAP);
+    ASSERTS_NOT_NULL(mxlVapVendorData, , ME, "mxlVapVendorData is NULL");
+    char* aggrConfig = amxc_var_dyncast(cstring_t, newParamValues);
+    swl_str_copy(mxlVapVendorData->AggrConfig, sizeof(mxlVapVendorData->AggrConfig), aggrConfig);
+    /* NULL value is provided because value will be applied via conf writing and sighup */
+    if(whm_mxl_isCertModeEnabled()) {
+        whm_mxl_determineVapParamAction(pAP, amxd_param_get_name(param), NULL);
+    }
+    free(aggrConfig);
+    SAH_TRACEZ_OUT(ME);
+}
+
+static void s_setGroupMgmtCipher_pwf(void* priv _UNUSED, amxd_object_t* object, amxd_param_t* param, const amxc_var_t* const newParamValues) {
+    SAH_TRACEZ_IN(ME);
+    /* WiFi.AccessPoint.{}.Vendor */
+    amxd_object_t* vapObj = amxd_object_get_parent(object);
+    T_AccessPoint* pAP = wld_ap_fromObj(vapObj);
+    ASSERT_NOT_NULL(pAP, , ME, "No AccessPoint Mapped");
+    mxl_VapVendorData_t* mxlVapVendorData = mxl_vap_getVapVendorData(pAP);
+    ASSERTS_NOT_NULL(mxlVapVendorData, , ME, "mxlVapVendorData is NULL");
+    char* cipher = amxc_var_dyncast(cstring_t, newParamValues);
+    swl_str_copy(mxlVapVendorData->GroupMgmtCipher, sizeof(mxlVapVendorData->GroupMgmtCipher), cipher);
+    /* NULL value is provided because value will be applied via conf writing and sighup */
+    if(whm_mxl_isCertModeEnabled()) {
+        whm_mxl_determineVapParamAction(pAP, amxd_param_get_name(param), NULL);
+    }
+    free(cipher);
+    SAH_TRACEZ_OUT(ME);
+}
+
+static void s_setGroupCipher_pwf(void* priv _UNUSED, amxd_object_t* object, amxd_param_t* param, const amxc_var_t* const newParamValues) {
+    SAH_TRACEZ_IN(ME);
+    /* WiFi.AccessPoint.{}.Vendor */
+    amxd_object_t* vapObj = amxd_object_get_parent(object);
+    T_AccessPoint* pAP = wld_ap_fromObj(vapObj);
+    ASSERT_NOT_NULL(pAP, , ME, "No AccessPoint Mapped");
+    mxl_VapVendorData_t* mxlVapVendorData = mxl_vap_getVapVendorData(pAP);
+    ASSERTS_NOT_NULL(mxlVapVendorData, , ME, "mxlVapVendorData is NULL");
+    char* group_cipher = amxc_var_dyncast(cstring_t, newParamValues);
+    swl_str_copy(mxlVapVendorData->GroupCipher, sizeof(mxlVapVendorData->GroupCipher), group_cipher);
+    /* NULL value is provided because value will be applied via conf writing and sighup */
+    if(whm_mxl_isCertModeEnabled()) {
+        whm_mxl_determineVapParamAction(pAP, amxd_param_get_name(param), NULL);
+    }
+    free(group_cipher);
+    SAH_TRACEZ_OUT(ME);
+}
+
+static void s_setRadiusSecretKey_pwf(void* priv _UNUSED, amxd_object_t* object, amxd_param_t* param, const amxc_var_t* const newParamValues) {
+    SAH_TRACEZ_IN(ME);
+    /* WiFi.AccessPoint.{}.Vendor */
+    amxd_object_t* vapObj = amxd_object_get_parent(object);
+    T_AccessPoint* pAP = wld_ap_fromObj(vapObj);
+    ASSERT_NOT_NULL(pAP, , ME, "No AccessPoint Mapped");
+    mxl_VapVendorData_t* mxlVapVendorData = mxl_vap_getVapVendorData(pAP);
+    ASSERTS_NOT_NULL(mxlVapVendorData, , ME, "mxlVapVendorData is NULL");
+    char* radiusSecret = amxc_var_dyncast(cstring_t, newParamValues);
+    swl_str_copy(mxlVapVendorData->radiusSecretKey, sizeof(mxlVapVendorData->radiusSecretKey), radiusSecret);
+    /* NULL value is provided because value will be applied via conf writing and sighup */
+    if(whm_mxl_isCertModeEnabled()) {
+        whm_mxl_determineVapParamAction(pAP, amxd_param_get_name(param), NULL);
+    }
+    free(radiusSecret);
+    SAH_TRACEZ_OUT(ME);
+}
+
+static void s_set11nProtection_pwf(void* priv _UNUSED, amxd_object_t* object, amxd_param_t* param, const amxc_var_t* const newParamValues) {
+    SAH_TRACEZ_IN(ME);
+    /* WiFi.AccessPoint.{}.Vendor */
+    amxd_object_t* vapObj = amxd_object_get_parent(object);
+    T_AccessPoint* pAP = wld_ap_fromObj(vapObj);
+    ASSERT_NOT_NULL(pAP, , ME, "No AccessPoint Mapped");
+    int paramValue = amxc_var_dyncast(uint32_t, newParamValues);
+    char set11nProtectionStr[MAX_NUM_OF_DIGITS] = {0};
+    swl_str_catFormat(set11nProtectionStr, sizeof(set11nProtectionStr), "%d", paramValue);
+    if(whm_mxl_isCertModeEnabled()) {
+        whm_mxl_determineVapParamAction(pAP, amxd_param_get_name(param), set11nProtectionStr);
+    }
+    SAH_TRACEZ_OUT(ME);
+}
+
+static void s_setEmlCapabTransitionTimeout_pwf(void* priv _UNUSED, amxd_object_t* object, amxd_param_t* param, const amxc_var_t* const newParamValues) {
+    SAH_TRACEZ_IN(ME);
+    /* WiFi.AccessPoint.{}.Vendor */
+    amxd_object_t* vapObj = amxd_object_get_parent(object);
+    T_AccessPoint* pAP = wld_ap_fromObj(vapObj);
+    ASSERT_NOT_NULL(pAP, , ME, "No AccessPoint Mapped");
+    int paramValue = amxc_var_dyncast(uint32_t, newParamValues);
+    char emlCapabTransitionTimeoutStr[MAX_NUM_OF_DIGITS] = {0};
+    swl_str_catFormat(emlCapabTransitionTimeoutStr, sizeof(emlCapabTransitionTimeoutStr), "%d", paramValue);
+    if(whm_mxl_isCertModeEnabled()) {
+        whm_mxl_determineVapParamAction(pAP, amxd_param_get_name(param), emlCapabTransitionTimeoutStr);
+    }
+    SAH_TRACEZ_OUT(ME);
+}
+
+static void s_setBooleanCertVendorParam_pwf(void* priv _UNUSED, amxd_object_t* object, amxd_param_t* param, const amxc_var_t* const newParamValues) {
+    SAH_TRACEZ_IN(ME);
+    /* WiFi.AccessPoint.{}.Vendor */
+    amxd_object_t* vapObj = amxd_object_get_parent(object);
+    T_AccessPoint* pAP = wld_ap_fromObj(vapObj);
+    ASSERT_NOT_NULL(pAP, , ME, "No AccessPoint Mapped");
+    bool newValue = amxc_var_dyncast(bool, newParamValues);
+    if(whm_mxl_isCertModeEnabled()) {
+        whm_mxl_determineVapParamAction(pAP, amxd_param_get_name(param), (newValue ? "1" : "0"));
+    }
+    SAH_TRACEZ_OUT(ME);
+}
+
+static void s_setInt32CertVendorParam_pwf(void* priv _UNUSED, amxd_object_t* object, amxd_param_t* param, const amxc_var_t* const newParamValues) {
+    SAH_TRACEZ_IN(ME);
+    /* WiFi.AccessPoint.{}.Vendor */
+    amxd_object_t* vapObj = amxd_object_get_parent(object);
+    T_AccessPoint* pAP = wld_ap_fromObj(vapObj);
+    ASSERT_NOT_NULL(pAP, , ME, "No AccessPoint Mapped");
+    int32_t paramValue = amxc_var_dyncast(int32_t, newParamValues);
+    char paramValueStr[MAX_NUM_OF_DIGITS] = {0};
+    swl_str_catFormat(paramValueStr, sizeof(paramValueStr), "%d", paramValue);
+    if(whm_mxl_isCertModeEnabled()) {
+        whm_mxl_determineVapParamAction(pAP, amxd_param_get_name(param), paramValueStr);
+    }
     SAH_TRACEZ_OUT(ME);
 }
 
@@ -863,7 +1158,59 @@ SWLA_DM_HDLRS(sVapVendorDmHdlrs,
                   SWLA_DM_PARAM_HDLR("DynamicMulticastMode", s_setDynamicMulticast_pwf),
                   SWLA_DM_PARAM_HDLR("DynamicMulticastRate", s_setDynamicMulticast_pwf),
                   SWLA_DM_PARAM_HDLR("DisableBeaconProtection", s_setDisableBeaconProtection_pwf),
-                  SWLA_DM_PARAM_HDLR("SetBridgeMode", s_setBridgeMode_pwf))
+                  SWLA_DM_PARAM_HDLR("DisablePbac", s_setDisablePbac_pwf),
+                  SWLA_DM_PARAM_HDLR("SetBridgeMode", s_setBridgeMode_pwf),
+                  SWLA_DM_PARAM_HDLR("MboCellAware", s_setMboCellAware_pwf),
+                  SWLA_DM_PARAM_HDLR("SaeExtKey", s_setSaeExtKey_pwf),
+                  SWLA_DM_PARAM_HDLR("EnableWPA3PersonalCompatibility", s_setEnableWPA3PersonalCompatibility_pwf),
+                  SWLA_DM_PARAM_HDLR("SetAggrConfig", s_setAggrConfig_pwf),
+                  SWLA_DM_PARAM_HDLR("Set11nProtection", s_set11nProtection_pwf),
+                  SWLA_DM_PARAM_HDLR("EmlCapabTransitionTimeout", s_setEmlCapabTransitionTimeout_pwf),
+                  SWLA_DM_PARAM_HDLR("ApProtectedKeepAliveRequired", s_setInt32CertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("MldMediumsyncPresent", s_setBooleanCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("MldMediumsyncDuration", s_setInt32CertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("MldMediumsyncOfdmedthresh", s_setInt32CertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("MldMediumsyncMaxtxop", s_setInt32CertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("EhtMacEpcsPrioAccess", s_setBooleanCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("MloT2lmSupport", s_setBooleanCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("GroupMgmtCipher", s_setGroupMgmtCipher_pwf),
+                  SWLA_DM_PARAM_HDLR("RadiusSecretKey", s_setRadiusSecretKey_pwf),
+                  SWLA_DM_PARAM_HDLR("RrmNeighRpt", s_setBooleanCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("WnmBssTransQueryAutoresp", s_setBooleanCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("WmmAcVICWMin", s_setInt32CertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("WmmAcVOCWMin", s_setInt32CertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("WmmAcBECWMin", s_setInt32CertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("WmmAcBKCWMin", s_setInt32CertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("WmmAcVICWMax", s_setInt32CertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("WmmAcVOCWMax", s_setInt32CertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("WmmAcBECWMax", s_setInt32CertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("WmmAcBKCWMax", s_setInt32CertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("WmmAcVIAifs", s_setInt32CertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("WmmAcVOAifs", s_setInt32CertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("WmmAcBEAifs", s_setInt32CertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("WmmAcBKAifs", s_setInt32CertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("WmmAcVITXOP", s_setInt32CertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("WmmAcVOTXOP", s_setInt32CertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("WmmAcBETXOP", s_setInt32CertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("WmmAcBKTXOP", s_setInt32CertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("WmmAcVIAcm", s_setInt32CertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("WmmAcVOAcm", s_setInt32CertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("WmmAcBEAcm", s_setInt32CertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("WmmAcBKAcm", s_setInt32CertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("TxQueueVICWMin", s_setInt32CertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("TxQueueVOCWMin", s_setInt32CertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("TxQueueBECWMin", s_setInt32CertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("TxQueueBKCWMin", s_setInt32CertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("TxQueueVICWMax", s_setInt32CertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("TxQueueVOCWMax", s_setInt32CertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("TxQueueBECWMax", s_setInt32CertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("TxQueueBKCWMax", s_setInt32CertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("TxQueueVIAifs", s_setInt32CertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("TxQueueVOAifs", s_setInt32CertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("TxQueueBEAifs", s_setInt32CertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("TxQueueBKAifs", s_setInt32CertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("GroupCipher", s_setGroupCipher_pwf),
+                  SWLA_DM_PARAM_HDLR("GasCBDelay", s_setInt32CertVendorParam_pwf))
               );
 
 void _whm_mxl_vap_setVapVendorObj_ocf(const char* const sig_name,
@@ -937,11 +1284,12 @@ static void s_setMloID_pwf(void* priv _UNUSED, amxd_object_t* object, amxd_param
     mxl_VapVendorData_t* mxlVapVendorData = mxl_vap_getVapVendorData(pAP);
     ASSERTS_NOT_NULL(mxlVapVendorData, , ME, "mxlVapVendorData is NULL");
     int32_t newMloId = amxc_var_get_int32_t(newParamValues);
-    if (newMloId == -1 && whm_mxl_isMLAssociatedVap(pAP)) {
+    if (newMloId == -1 && !(mxlVapVendorData->MLO_destroyInProgress) && whm_mxl_isMLAssociatedVap(pAP)) {
         whm_mxl_destroyMLVap(pAP);
         return;
     }
     mxlVapVendorData->mloId = newMloId;
+    whm_mxl_hostapd_setMldParams(pAP);
     char mloIdValStr[MAX_NUM_OF_DIGITS] = {0};
     swl_str_catFormat(mloIdValStr, sizeof(mloIdValStr), "%d", newMloId);
     int32_t numLinks = whm_mxl_getNumMLlinksbyID(newMloId);
@@ -1112,6 +1460,16 @@ void _whm_mxl_vap_updateSsidAdvertisement(const char* const sig_name _UNUSED,
     whm_mxl_updateSsidAdvertisement(pAP);
 }
 
+void _whm_mxl_vap_updateMaxAssociatedDevices(const char* const sig_name _UNUSED,
+                                             const amxc_var_t* const data,
+                                             void* const priv _UNUSED) {
+    amxd_object_t* object = amxd_dm_signal_get_object(get_wld_plugin_dm(), data);
+    ASSERTS_NOT_NULL(object, , ME, "object is NULL");
+    T_AccessPoint* pAP = (T_AccessPoint*) object->priv;
+    ASSERTS_NOT_NULL(pAP, , ME, "pAP is NULL");
+    whm_mxl_updateMaxAssociatedDevices(pAP);
+}
+
 static swl_rc_ne s_get20MHzTxPowerCb(swl_rc_ne rc, struct nlmsghdr* nlh, void* priv) {
     ASSERT_FALSE((rc <= SWL_RC_ERROR), rc, ME, "Request error");
     ASSERT_NOT_NULL(nlh, SWL_RC_ERROR, ME, "NULL");
@@ -1151,6 +1509,8 @@ static swl_rc_ne s_getNeighborPsd(T_AccessPoint* pNeighAp, uint8_t* psd) {
     swl_rc_ne rc = SWL_RC_OK;
     uint32_t subcmd = LTQ_NL80211_VENDOR_SUBCMD_GET_20MHZ_TX_POWER;
 
+    // TODO: Tx Power is a radio parameter, there is a radio function called
+    // `mxl_rad_getTxPower`, Align with that implementation.
     ASSERTI_TRUE(mxl_isApReadyToProcessVendorCmd(masterVap), SWL_RC_INVALID_STATE, ME, "AP not ready to process Vendor cmd");
     rc = wld_ap_nl80211_sendVendorSubCmd(masterVap, OUI_MXL, subcmd, masterVap->pSSID->Name, strlen(masterVap->pSSID->Name),
                                          VENDOR_SUBCMD_IS_SYNC, VENDOR_SUBCMD_IS_WITHOUT_ACK, 0, s_get20MHzTxPowerCb, &tx_power_20mhz);
@@ -1218,4 +1578,38 @@ swl_rc_ne whm_mxl_vap_updated_neighbor(T_AccessPoint* pAP, T_ApNeighbour* pApNei
 
     SAH_TRACEZ_OUT(ME);
     return rc;
+}
+
+/**
+ * @brief Request to reconf BSS from reconf FSM
+ *
+ * @param pAP accesspoint
+ * @return none.
+ */
+void whm_mxl_vap_requestReconf(T_AccessPoint* pAP) {
+    ASSERTI_NOT_NULL(pAP, , ME, "NULL");
+    mxl_VapVendorData_t* pVapVendor = mxl_vap_getVapVendorData(pAP);
+    ASSERT_NOT_NULL(pVapVendor, , ME, "pVapVendor is NULL");
+    setBitLongArray(pVapVendor->reconfFsm.FSM_BitActionArray, FSM_BW, RECONF_FSM_DO_RECONF_BSS);
+    whm_mxl_reconfMngr_notifyVapCommit(pAP);
+}
+
+swl_rc_ne whm_mxl_vap_postUpActions(T_AccessPoint* pAP) {
+    ASSERT_NOT_NULL(pAP, SWL_RC_INVALID_PARAM, ME, "NULL");
+    mxl_VapVendorData_t* pVapVendorData = mxl_vap_getVapVendorData(pAP);
+    ASSERT_NOT_NULL(pVapVendorData, SWL_RC_INVALID_PARAM, ME, "pVapVendorData is NULL");
+
+    if (pVapVendorData->vapEnableReloadPending) {
+        setBitLongArray(pVapVendorData->reconfFsm.FSM_BitActionArray, FSM_BW, RECONF_FSM_RELOAD_BSS);
+        whm_mxl_reconfMngr_notifyVapCommit(pAP);
+        pVapVendorData->vapEnableReloadPending = false;
+    }
+
+    return SWL_RC_OK;
+}
+
+swl_rc_ne whm_mxl_vap_postDownActions(T_AccessPoint* pAP) {
+    ASSERT_NOT_NULL(pAP, SWL_RC_INVALID_PARAM, ME, "NULL");
+    /* Add post VAP down actions here */
+    return SWL_RC_OK;
 }

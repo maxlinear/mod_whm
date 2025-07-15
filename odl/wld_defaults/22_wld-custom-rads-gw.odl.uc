@@ -9,11 +9,10 @@
                 parameter ActiveAntennaCtrl = 15;
                 parameter TxChainCtrl = 15;
                 parameter RxChainCtrl = 15;
+                parameter STA_Mode = false;
             }
 {% if (Radio.OperatingFrequency == "5GHz") : %}
             object '{{Radio.Alias}}' {
-                parameter STA_Mode = false;
-                parameter STASupported_Mode = false;
                 parameter AutoChannelEnable = true;
                 parameter OperatingChannelBandwidth = "80MHz";
                 object IEEE80211ax {

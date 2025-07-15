@@ -18,6 +18,8 @@
 #include "wld/wld_util.h"
 #include "wld/wld_radio.h"
 #include "wld/wld_chanmgt.h"
+#include "wld/wld_secDmn.h"
+#include "wld/wld_secDmnGrp.h"
 #include "swl/swl_common.h"
 #include "swla/swla_chanspec.h"
 #include "whm_mxl_utils.h"
@@ -184,6 +186,70 @@ bool whm_mxl_utils_hasDisabledVap(T_Radio* pRad) {
         }
     }
     return false;
+}
+
+/**
+ * @brief Get number of VAPs in radio
+ *
+ * @param pAP Radui
+ * @return return number of VAPs in radio.
+ */
+int whm_mxl_utils_getNumOfVaps(T_Radio* pRad) {
+    ASSERT_NOT_NULL(pRad, -1, ME, "pRad is NULL");
+    int numOfVaps = 0;
+    T_AccessPoint* pAP;
+    wld_rad_forEachAp(pAP, pRad) {
+        if (pAP) {
+            numOfVaps++;
+        }
+    }
+    return numOfVaps;
+}
+
+/**
+ * @brief Get the first enabled AP in Radio
+ *
+ * @param pRad Radio
+ * @return pAP Return AP context.
+ */
+T_AccessPoint* whm_mxl_utils_getFirstEnabledVap(T_Radio* pRad) {
+    ASSERT_NOT_NULL(pRad, NULL, ME, "pRad is NULL");
+    T_AccessPoint* pAP;
+    wld_rad_forEachAp(pAP, pRad) {
+        if (pAP && !whm_mxl_utils_isDummyVap(pAP)) {
+            if (pAP->enable && (pAP->status == APSTI_ENABLED)) {
+                return pAP;
+            }
+        }
+    }
+    return NULL;
+}
+
+/**
+ * @brief Get the master VAP of the Radio
+ *
+ * @param pRad Radio
+ * @return pAP Return master VAP context.
+ */
+T_AccessPoint* whm_mxl_utils_getMasterVap(T_Radio* pRad) {
+    ASSERT_NOT_NULL(pRad, NULL, ME, "pRad is NULL");
+    T_AccessPoint* pAP;
+    wld_rad_forEachAp(pAP, pRad) {
+        if (whm_mxl_utils_isDummyVap(pAP)) {
+            return pAP;
+        }
+    }
+    return NULL;
+}
+
+uint32_t whm_mxl_utils_numOfGrpMembers(T_Radio* pRad) {
+    ASSERTS_NOT_NULL(pRad, 0, ME, "NULL");
+    wld_secDmn_t* pSecDmn = pRad->hostapd;
+    ASSERTS_NOT_NULL(pSecDmn->dmnProcess, 0, ME, "NULL");
+    if (wld_secDmn_isGrpMember(pSecDmn)) {
+        return wld_secDmnGrp_getMembersCount(wld_secDmn_getGrp(pSecDmn));
+    }
+    return 1;
 }
 
 /**

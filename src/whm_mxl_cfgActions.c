@@ -32,6 +32,7 @@
 #include "whm_mxl_rad.h"
 #include "whm_mxl_vap.h"
 #include "whm_mxl_zwdfs.h"
+#include "whm_mxl_reconfMngr.h"
 
 #define ME "mxlAct"
 
@@ -50,6 +51,15 @@ static swl_rc_ne s_doHapdToggle(T_Radio* pRad, T_AccessPoint* pAP _UNUSED) {
 static swl_rc_ne s_doHapdSighup(T_Radio* pRad, T_AccessPoint* pAP _UNUSED) {
     ASSERT_NOT_NULL(pRad, SWL_RC_INVALID_PARAM, ME, "pRad is NULL");
     pRad->pFA->mfn_wrad_secDmn_refresh(pRad, SET);
+    return SWL_RC_OK;
+}
+
+static swl_rc_ne s_doReconf(T_Radio* pRad, T_AccessPoint* pAP _UNUSED) {
+    ASSERT_NOT_NULL(pRad, SWL_RC_INVALID_PARAM, ME, "pRad is NULL");
+    mxl_VendorData_t* pRadVendor = mxl_rad_getVendorData(pRad);
+    ASSERTI_NOT_NULL(pRadVendor, SWL_RC_INVALID_PARAM, ME, "pRadVendor is NULL");
+    setBitLongArray(pRadVendor->reconfFsm.FSM_BitActionArray, FSM_BW, RECONF_FSM_DO_RECONF);
+    whm_mxl_reconfMngr_doCommit(pRad);
     return SWL_RC_OK;
 }
 
@@ -93,6 +103,7 @@ SWL_TABLE(sActionHandlers,
               {HAPD_ACTION_NEED_UPDATE_BEACON,  s_doUpdateBeacon},
               {HAPD_ACTION_NEED_SIGHUP,         s_doHapdSighup},
               {HAPD_ACTION_NEED_TOGGLE,         s_doHapdToggle},
+              {HAPD_ACTION_NEED_RECONF,         s_doReconf},
               {HAPD_ACTION_NEED_RESTART,        s_doHapdRestart},
               ));
 
@@ -111,6 +122,7 @@ SWL_TABLE(sVendorParamsOdlToConf,
               {"DfsChStateFile",                "dfs_channels_state_file_location"},
 #ifdef CONFIG_VENDOR_MXL_PROPRIETARY
               {"DfsDebugChan",                  "dfs_debug_chan"},
+              {"ZwdfsDebugChan",                "zwdfs_debug_chan"},
 #endif /* CONFIG_VENDOR_MXL_PROPRIETARY */
               {"SubBandDFS",                    "sub_band_dfs"},
               {"TwtResponderSupport",           "twt_responder_support"},
@@ -138,6 +150,8 @@ SWL_TABLE(sVendorParamsOdlToConf,
               {"AcsFils",                       "acs_fils"},
               {"Acs6gOptChList",                "acs_6g_opt_ch_list"},
               {"AcsStrictChList",               "acs_strict_chanlist"},
+              {"Acs6gPunctMode",                "acs_6g_punct_mode"},
+              {"AcsBgScanInterval",             "acs_bgscan_interval"},
 #endif /* CONFIG_VENDOR_MXL_PROPRIETARY */
               {"BackgroundCac",                 "background_cac"},
               {"StartAfter",                    "start_after"},
@@ -153,6 +167,161 @@ SWL_TABLE(sVendorParamsOdlToConf,
               {"AfcLocationType",               "afc_location_type"},
               {"AfcRequestId",                  "afc_request_id"},
               {"AfcRequestVersion",             "afc_request_version"},
+              {"HePhyLdpcCodingInPayload",      "he_phy_ldpc_coding_in_payload"},
+              {"HeMacMsduAckEnabledMpduSupport","he_mac_a_msdu_in_ack_enabled_a_mpdu_support"},
+              {"HeMacMaxAMpduLengthExponent",   "he_mac_maximum_a_mpdu_length_exponent"},
+              {"HeMacOmControlSupport",         "he_mac_om_control_support"},
+              {"HtMinMpduStartSpacing",         "ht_minimum_mpdu_start_spacing"},
+              {"MultibssEnable",                "multibss_enable"},
+              {"HeMcsNssRxMapLessOrEqual80Mhz", "he_mcs_nss_rx_he_mcs_map_less_than_or_equal_80_mhz"},
+              {"HeMcsNssTxMapLessOrEqual80Mhz", "he_mcs_nss_tx_he_mcs_map_less_than_or_equal_80_mhz"},
+              {"HeMcsNssRxHeMcsMap160Mhz",      "he_mcs_nss_rx_he_mcs_map_160_mhz"},
+              {"HeMcsNssTxHeMcsMap160Mhz",      "he_mcs_nss_tx_he_mcs_map_160_mhz"},
+              {"VhtMcsSetPart0",                "vht_mcs_set_part0"},
+              {"VhtMcsSetPart1",                "vht_mcs_set_part1"},
+              {"HePhyMacNc",                    "he_phy_max_nc"},
+              {"SrCtrlHesigaSpatialReuseVal15", "sr_control_field_hesiga_spatial_reuse_value15_allowed"},
+              {"HeOperationCohostedBss",        "he_operation_cohosted_bss"},
+              {"HeMuEdcaIePresent",             "he_mu_edca_ie_present"},
+              {"HePhyDcmMaxConstellationTx",    "he_phy_dcm_max_constellation_tx"},
+              {"HePhyDcmMaxConstellationRx",    "he_phy_dcm_max_constellation_rx"},
+              {"HePhyDcmMaxNssTx",              "he_phy_dcm_max_nss_tx"},
+              {"HePhyDcmMaxNssRx",              "he_phy_dcm_max_nss_rx"},
+              {"Ieee80211nAcAxCompat",          "ieee80211n_acax_compat"},
+              {"EnableHeDebugMode",             "enable_he_debug_mode"},
+              {"HeMuEdcaAcBeAifsn",             "he_mu_edca_ac_be_aifsn"},
+              {"HeMuEdcaAcBeEcwmin",            "he_mu_edca_ac_be_ecwmin"},
+              {"HeMuEdcaAcBeEcwmax",            "he_mu_edca_ac_be_ecwmax"},
+              {"HeMuEdcaAcBeTimer",             "he_mu_edca_ac_be_timer"},
+              {"HeMuEdcaAcBkAifsn",             "he_mu_edca_ac_bk_aifsn"},
+              {"HeMuEdcaAcBkAci",               "he_mu_edca_ac_bk_aci"},
+              {"HeMuEdcaAcBeEcwmin",            "he_mu_edca_ac_bk_ecwmin"},
+              {"HeMuEdcaAcBeEcwmax",            "he_mu_edca_ac_bk_ecwmax"},
+              {"HeMuEdcaAcBeTimer",             "he_mu_edca_ac_bk_timer"},
+              {"HeMuEdcaAcViEcwmin",            "he_mu_edca_ac_vi_ecwmin"},
+              {"HeMuEdcaAcViEcwmax",            "he_mu_edca_ac_vi_ecwmax"},
+              {"HeMuEdcaAcViAifsn",             "he_mu_edca_ac_vi_aifsn"},
+              {"HeMuEdcaAcViAci",               "he_mu_edca_ac_vi_aci"},
+              {"HeMuEdcaAcViTimer",             "he_mu_edca_ac_vi_timer"},
+              {"HeMuEdcaAcVoAifsn",             "he_mu_edca_ac_vo_aifsn"},
+              {"HeMuEdcaAcVoAci",               "he_mu_edca_ac_vo_aci"},
+              {"HeMuEdcaAcVoEcwmin",            "he_mu_edca_ac_vo_ecwmin"},
+              {"HeMuEdcaAcVoEcwmax",            "he_mu_edca_ac_vo_ecwmax"},
+              {"HeMuEdcaAcVoTimer",             "he_mu_edca_ac_vo_timer"},
+              {"EnableEhtDebugMode",            "enable_eht_debug_mode"},
+              {"EhtMacEhtOmControl",            "eht_mac_eht_om_control"},
+              {"EhtMacRestrictedTwt",           "eht_mac_restricted_twt"},
+              {"EhtMacTrigTxopSharingMode1",    "eht_mac_trig_txop_sharing_mode1"},
+              {"EhtMacTrigTxopSharingMode2",    "eht_mac_trig_txop_sharing_mode2"},
+              {"EhtPhyTrigMuBfPartialBwFb",     "eht_phy_trig_mu_bf_partial_bw_fb"},
+              {"EhtPhyMaxNc",                   "eht_phy_max_nc"},
+              {"EhtMcsMapLessOrEq80MHzRx09",    "eht_mcs_map_less_than_or_equal_80_mhz_rx_max_nss_eht_mcs_0_9"},
+              {"EhtMcsMapLessOrEq80MHzTx09",    "eht_mcs_map_less_than_or_equal_80_mhz_tx_max_nss_eht_mcs_0_9"},
+              {"EhtMcsMapLessOrEq80MHzRx1011",  "eht_mcs_map_less_than_or_equal_80_mhz_rx_max_nss_eht_mcs_10_11"},
+              {"EhtMcsMapLessOrEq80MHzTx1011",  "eht_mcs_map_less_than_or_equal_80_mhz_tx_max_nss_eht_mcs_10_11"},
+              {"EhtMcsMapLessOrEq80MHzRx1213",  "eht_mcs_map_less_than_or_equal_80_mhz_rx_max_nss_eht_mcs_12_13"},
+              {"EhtMcsMapLessOrEq80MHzTx1213",  "eht_mcs_map_less_than_or_equal_80_mhz_tx_max_nss_eht_mcs_12_13"},
+              {"EhtPhyMaxAmpduLenExpExt",       "eht_mac_max_ampdu_len_exp_ext"},
+              {"EhtPhySuBeamformer",            "eht_phy_su_beamformer"},
+              {"EhtPhySuBeamformee",            "eht_phy_su_beamformee"},
+              {"EhtMacMaxMpduLen",              "eht_mac_max_mpdu_len"},
+              {"EhtPhyPpeThresholdsPresent",    "eht_phy_ppe_thresholds_present"},
+              {"EhtPhyCommonNominalPktPad",     "eht_phy_common_nominal_pkt_pad"},
+              {"SetDynamicMuTypeDownLink",      "sDynamicMuTypeDownLink"},
+              {"SetDynamicMuTypeUpLink",        "sDynamicMuTypeUpLink"},
+              {"EhtMacScsTrafficDesc",          "eht_mac_scs_traffic_desc"},
+              {"EhtMldTsfDiff",                 "eht_mld_tsf_diff"},
+              {"EhtMcsMap160MHzRxMcs09",        "eht_mcs_map_160_mhz_rx_max_nss_eht_mcs_0_9"},
+              {"EhtMcsMap160MHzTxMcs09",        "eht_mcs_map_160_mhz_tx_max_nss_eht_mcs_0_9"},
+              {"EhtMcsMap160MHzTxMcs1011",      "eht_mcs_map_160_mhz_tx_max_nss_eht_mcs_10_11"},
+              {"EhtMcsMap160MHzRxMcs1011",      "eht_mcs_map_160_mhz_rx_max_nss_eht_mcs_10_11"},
+              {"EhtMcsMap160MHzTxMcs1213",      "eht_mcs_map_160_mhz_tx_max_nss_eht_mcs_12_13"},
+              {"EhtMcsMap160MHzRxMcs1213",      "eht_mcs_map_160_mhz_rx_max_nss_eht_mcs_12_13"},
+              {"EhtMcsMap320MHzRxMcs09",        "eht_mcs_map_320_mhz_rx_max_nss_eht_mcs_0_9"},
+              {"EhtMcsMap320MHzTxMcs09",        "eht_mcs_map_320_mhz_tx_max_nss_eht_mcs_0_9"},
+              {"EhtMcsMap320MHzRxMcs1011",      "eht_mcs_map_320_mhz_rx_max_nss_eht_mcs_10_11"},
+              {"EhtMcsMap320MHzTxMcs1011",      "eht_mcs_map_320_mhz_tx_max_nss_eht_mcs_10_11"},
+              {"EhtMcsMap320MHzRxMcs1213",      "eht_mcs_map_320_mhz_rx_max_nss_eht_mcs_12_13"},
+              {"EhtMcsMap320MHzTxMcs1213",      "eht_mcs_map_320_mhz_tx_max_nss_eht_mcs_12_13"},
+              {"EhtPhy320MHzIn6GHz",            "eht_phy_320_mhz_in_6_ghz"},
+              {"AdvertiseEcsaIe",               "advertise_ecsa_ie"},
+              {"SetMaxMpduLen",                 "sMaxMpduLen"},
+              {"HePhySuBeamformeeCapable",      "he_phy_su_beamformee_capable"},
+              {"HePhySuBeamformerCapable",      "he_phy_su_beamformer_capable"},
+              {"HePhyBeamformeeStsLesOrEq80Mhz","he_phy_beamformee_sts_for_less_than_or_equal_80mhz"},
+              {"HePhyBeamformeeStsGreater80Mhz","he_phy_beamformee_sts_for_greater_than_80mhz"},
+              {"HePhyDeviceClass",              "he_phy_device_class"},
+              {"HePhySuPpdu1xHeLtfAnd08UsGi",   "he_phy_su_ppdu_with_1x_he_ltf_and_08_us_gi"},
+              {"HePhySuPpduHeMu4xHeLtf08UsGi",  "he_phy_su_ppdu_and_he_mu_with_4x_he_ltf_and_08us_gi"},
+              {"HePhyMuBeamformerCapable",      "he_phy_mu_beamformer_capable"},
+              {"HePhyNdpWith4xHeLtfAnd32UsGi",  "he_phy_ndp_with_4x_he_ltf_and_32_us_gi"},
+              {"HePhyNg16SuFeedback",           "he_phy_ng_16_su_feedback"},
+              {"HePhyNg16MuFeedback",           "he_phy_ng_16_mu_feedback"},
+              {"HePhyNumSoundDimenLeOrEq80Mhz", "he_phy_number_of_sounding_dimensions_for_less_than_or_equal_80mhz"},
+              {"HePhyNumSoundDimenGreater80Mhz","he_phy_number_of_sounding_dimensions_for_greater_than_80mhz"},
+              {"HePhyTriggerSuBeamformFeedback","he_phy_triggered_su_beamforming_feedback"},
+              {"HePhyDopplerRx",                "he_phy_doppler_rx"},
+              {"HePhyDopplerTx",                "he_phy_doppler_tx"},
+              {"HePhyFullBandwidthUlMuMimo",    "he_phy_full_bandwidth_ul_mu_mimo"},
+              {"HePhyPartialBandwidthUlMuMimo", "he_phy_partial_bandwidth_ul_mu_mimo"},
+              {"HePhyPartialBWExtendedRange",   "he_phy_partial_bandwidth_extended_range"},
+              {"HePhyTriggeredCqiFeedback",     "he_phy_triggered_cqi_feedback"},
+              {"HePhyPpeThresholdsPresent",     "he_phy_ppe_thresholds_present"},
+              {"HePhyCodebookSize42SuSupport",  "he_phy_codebook_size42_for_su_support"},
+              {"HePhyCodebookSize75MuSupport",  "he_phy_codebook_size75_for_mu_support"},
+              {"HePhyPowBoostFactAlphaSupport", "he_phy_power_boost_factor_alpha_support"},
+              {"HeMacOmCtrlMuDisableRxSupport", "he_mac_om_control_ul_mu_data_disable_rx_support"},
+              {"HeOpTxopDurationRtsThreshold",  "he_operation_txop_duration_rts_threshold"},
+              {"HeMacUl2x996ToneRuSupport",     "he_mac_ul_2x996tone_ru_support"},
+              {"HeMacAckEnabledAggrSupport",    "he_mac_ack_enabled_aggregation_support"},
+              {"HeMacBroadcastTwtSupport",      "he_mac_broadcast_twt_support"},
+              {"HePhyDcmMaxBw",                 "he_phy_dcm_max_bw"},
+              {"HePhyLong16HeSigOfdmSymSupport","he_phy_longer_than_16_he_sigb_ofdm_sym_support"},
+              {"HeMacNdpFeedbackReportSupport", "he_mac_ndp_feedback_report_support"},
+              {"HePhyRx1024QLt242ToneRuSupport","he_phy_rx_1024_qam_lt_242_tone_ru_support"},
+              {"HePhyRxFullBwSuUsingMuCompSigb","he_phy_rx_full_bw_su_using_mu_comp_sigb"},
+              {"HePhyRxFulBwUsingMuNonComSigb", "he_phy_rx_full_bw_su_using_mu_non_comp_sigb"},
+              {"HePhyStbcTxLessThanOrEq80Mhz",  "he_phy_stbc_tx_less_than_or_equal_80mhz"},
+              {"HePhyStbcTxGreaterThan80Mhz",   "he_phy_stbc_tx_greater_than_80mhz"},
+              {"HeOperationErSuDisable",        "he_operation_er_su_disable"},
+              {"HePhyErSuPpdu4xLtf8UsGi",       "he_phy_er_su_ppdu_4x_ltf_8us_gi"},
+              {"HePhyPreamblePuncturingRx",     "he_phy_preamble_puncturing_rx"},
+              {"HeMacMultiTidAggrTxSupport",    "he_mac_multi_tid_aggregation_tx_support"},
+              {"HeMacMultiTidAggrRxSupport",    "he_mac_multi_tid_aggregation_rx_support"},
+              {"EhtPhyNumSoundDim80MhzOrBelow", "eht_phy_num_sounding_dim_80_mhz_or_below"},
+              {"EhtPhyNumSoundingDim160Mhz",    "eht_phy_num_sounding_dim_160_mhz"},
+              {"EhtPhyNumSoundingDim320Mhz",    "eht_phy_num_sounding_dim_320_mhz"},
+              {"EhtPhyMuBeamformerBw80MhzBelow","eht_phy_mu_beamformer_bw_80_mhz_or_below"},
+              {"EhtPhyMuBeamformerBw160Mhz",    "eht_phy_mu_beamformer_bw_160_mhz"},
+              {"EhtPhyMuBeamformerBw320Mhz",    "eht_phy_mu_beamformer_bw_320_mhz"},
+              {"EhtPhyNdp4xEhtLtfAnd32UsGi",    "eht_phy_ndp_4x_eht_ltf_and_3_2_us_gi"},
+              {"EhtPhyPartialBwUlMuMimo",       "eht_phy_partial_bw_ul_mu_mimo"},
+              {"EhtPhyBeamformeeSs80MhzOrBelow","eht_phy_beamformee_ss_80_mhz_or_below"},
+              {"EhtPhyBeamformeeSs160Mhz",      "eht_phy_beamformee_ss_160_mhz"},
+              {"EhtPhyBeamformeeSs320Mhz",      "eht_phy_beamformee_ss_320_mhz"},
+              {"EhtPhyEhtDupIn6Ghz",            "eht_phy_eht_dup_in_6_ghz"},
+              {"EhtPhy20MhzOpStaRxNdpWiderBw",  "eht_phy_20_mhz_operating_sta_rx_ndp_with_wider_bw"},
+              {"EhtPhyNg16SuFeedback",          "eht_phy_ng_16_su_feedback"},
+              {"EhtPhyNg16MuFeedback",          "eht_phy_ng_16_mu_feedback"},
+              {"EhtPhyCodebookSize42SuFb",      "eht_phy_codebook_size_4_2_su_fb"},
+              {"EhtPhyCodebookSize755MuFb",     "eht_phy_codebook_size_75_5_mu_fb"},
+              {"EhtPhyTrigSuBfFb",              "eht_phy_trig_su_bf_fb"},
+              {"EhtPhyTrigCqiFb",               "eht_phy_trig_cqi_fb"},
+              {"EhtPhyPartialBwDlMuMimo",       "eht_phy_partial_bw_dl_mu_mimo"},
+              {"EhtPhyPsrBasedSr",              "eht_phy_psr_based_sr"},
+              {"EhtPhyEhtMuPpdu4xEhtLtf08UsGi", "eht_phy_eht_mu_ppdu_with_4x_eht_ltf_and_0_8_us_gi"},
+              {"EhtPhyRx1024Qam4096QamBel242Ru","eht_phy_rx_1024_qam_and_4096_qam_below_242_ru"},
+              {"EhtPhyMaxNumOfSupportedEhtLtfs","eht_phy_max_num_of_supported_eht_ltfs"},
+              {"EhtPhyMcs15",                   "eht_phy_mcs_15"},
+              {"EhtPhyNonOfdmaMuMimo80MhzBelow","eht_phy_non_ofdma_ul_mu_mimo_bw_80_mhz_or_below"},
+              {"EhtPhyNonOfdmaUlMuMimoBw160Mhz","eht_phy_non_ofdma_ul_mu_mimo_bw_160_mhz"},
+              {"EhtPhyNonOfdmaUlMuMimoBw320Mhz","eht_phy_non_ofdma_ul_mu_mimo_bw_320_mhz"},
+              {"SetDynamicMuMinStationsInGroup", "sDynamicMuMinStationsInGroup=4"},
+              {"SetDynamicMuMaxStationsInGroup", "sDynamicMuMaxStationsInGroup"},
+              {"SetDynamicMuCdbConfig",          "sDynamicMuCdbConfig"},
+              {"Rnr6gOpClass137Allowed",         "rnr_6g_op_class_137_allowed"},
+              {"RnrTbttMldNonZeroPad",           "rnr_tbtt_mld_non_zero_pad"},
+              {"Country3",                       "country3"},
               //VAP Parameters
               {"EnableHairpin",                 "enable_hairpin"},
               {"ApMaxInactivity",               "ap_max_inactivity"},
@@ -175,10 +344,60 @@ SWL_TABLE(sVendorParamsOdlToConf,
               {"SoftBlockAclOnProbeReq",        "soft_block_acl_on_probe_req"},
               {"OWETransitionBSSID",            "owe_transition_bssid"},
               {"OWETransitionSSID",             "owe_transition_ssid"},
+              {"RadiusSecretKey",               "auth_server_shared_secret"},
               {"DynamicMulticastMode",          "dynamic_multicast_mode"},
               {"DynamicMulticastRate",          "dynamic_multicast_rate"},
               {"DisableBeaconProtection",       "disable_beacon_prot"},
+              {"DisablePbac",                   "disable_pbac"},
               {"SetBridgeMode",                 "sBridgeMode"},
+              {"MboCellAware",                  "mbo_cell_aware"},
+              {"SetAggrConfig",                 "sAggrConfig"},
+              {"Set11nProtection",              "s11nProtection"},
+              {"EmlCapabTransitionTimeout",     "eml_capab_transition_timeout"},
+              {"ApProtectedKeepAliveRequired",  "ap_protected_keep_alive_required"},
+              {"MldMediumsyncPresent",          "mld_mediumsync_present"},
+              {"MldMediumsyncDuration",         "mld_mediumsync_duration"},
+              {"MldMediumsyncOfdmedthresh",     "mld_mediumsync_ofdmedthresh"},
+              {"MldMediumsyncMaxtxop",          "mld_mediumsync_maxtxop"},
+              {"EhtMacEpcsPrioAccess",          "eht_mac_epcs_prio_access"},
+              {"MloT2lmSupport",                "mlo_t2lm_support"},
+              {"GroupMgmtCipher",               "group_mgmt_cipher"},
+              {"RrmNeighRpt",                   "rrm_neighbor_report"},
+              {"WnmBssTransQueryAutoresp",      "wnm_bss_trans_query_auto_resp"},
+              {"WmmAcVICWMin",                  "wmm_ac_vi_cwmin"},
+              {"WmmAcVOCWMin",                  "wmm_ac_vo_cwmin"},
+              {"WmmAcBECWMin",                  "wmm_ac_be_cwmin"},
+              {"WmmAcBKCWMin",                  "wmm_ac_bk_cwmin"},
+              {"WmmAcVICWMax",                  "wmm_ac_vi_cwmax"},
+              {"WmmAcVOCWMax",                  "wmm_ac_vo_cwmax"},
+              {"WmmAcBECWMax",                  "wmm_ac_be_cwmax"},
+              {"WmmAcBKCWMax",                  "wmm_ac_bk_cwmax"},
+              {"WmmAcVIAifs",                   "wmm_ac_vi_aifs"},
+              {"WmmAcVOAifs",                   "wmm_ac_vo_aifs"},
+              {"WmmAcBEAifs",                   "wmm_ac_be_aifs"},
+              {"WmmAcBKAifs",                   "wmm_ac_bk_aifs"},
+              {"WmmAcVITXOP",                   "wmm_ac_vi_txop_limit"},
+              {"WmmAcVOTXOP",                   "wmm_ac_vo_txop_limit"},
+              {"WmmAcBETXOP",                   "wmm_ac_be_txop_limit"},
+              {"WmmAcBKTXOP",                   "wmm_ac_bk_txop_limit"},
+              {"WmmAcVIAcm",                    "wmm_ac_vi_acm"},
+              {"WmmAcVOAcm",                    "wmm_ac_vo_acm"},
+              {"WmmAcBEAcm",                    "wmm_ac_be_acm"},
+              {"WmmAcBKAcm",                    "wmm_ac_bk_acm"},
+              {"TxQueueVICWMin",                "tx_queue_data1_cwmin"},
+              {"TxQueueVOCWMin",                "tx_queue_data0_cwmin"},
+              {"TxQueueBECWMin",                "tx_queue_data2_cwmin"},
+              {"TxQueueBKCWMin",                "tx_queue_data3_cwmin"},
+              {"TxQueueVICWMax",                "tx_queue_data1_cwmax"},
+              {"TxQueueVOCWMax",                "tx_queue_data0_cwmax"},
+              {"TxQueueBECWMax",                "tx_queue_data2_cwmax"},
+              {"TxQueueBKCWMax",                "tx_queue_data3_cwmax"},
+              {"TxQueueVIAifs",                 "tx_queue_data1_aifs"},
+              {"TxQueueVOAifs",                 "tx_queue_data0_aifs"},
+              {"TxQueueBEAifs",                 "tx_queue_data2_aifs"},
+              {"TxQueueBKAifs",                 "tx_queue_data3_aifs"},
+              {"GroupCipher",                   "group_cipher"},
+              {"GasCBDelay",                    "gas_comeback_delay"},
               ));
 
 SWL_TABLE(sRadCfgParamsActionMap,
@@ -197,6 +416,7 @@ SWL_TABLE(sRadCfgParamsActionMap,
               {"AcsFils",                       HAPD_ACTION_NEED_RESTART},
               {"Acs6gOptChList",                HAPD_ACTION_NEED_RESTART},
               {"AcsStrictChList",               HAPD_ACTION_NEED_RESTART},
+              {"Acs6gPunctMode",                HAPD_ACTION_NEED_RESTART},
 #endif /* CONFIG_VENDOR_MXL_PROPRIETARY */
               {"AfcdSock",                      HAPD_ACTION_NEED_RESTART},
               {"AfcOpClass",                    HAPD_ACTION_NEED_RESTART},
@@ -219,6 +439,7 @@ SWL_TABLE(sRadCfgParamsActionMap,
               {"DfsChStateFile",                HAPD_ACTION_NEED_TOGGLE},
 #ifdef CONFIG_VENDOR_MXL_PROPRIETARY
               {"DfsDebugChan",                  HAPD_ACTION_NEED_TOGGLE},
+              {"ZwdfsDebugChan",                HAPD_ACTION_NEED_TOGGLE},
 #endif /* CONFIG_VENDOR_MXL_PROPRIETARY */
               {"SubBandDFS",                    HAPD_ACTION_NEED_TOGGLE},
               {"TwtResponderSupport",           HAPD_ACTION_NEED_TOGGLE},
@@ -242,6 +463,162 @@ SWL_TABLE(sRadCfgParamsActionMap,
               {"StartAfterDelay",               HAPD_ACTION_NEED_TOGGLE},
               {"StartAfterWatchdogTime",        HAPD_ACTION_NEED_TOGGLE},
               {"PunctureBitMap",                HAPD_ACTION_NEED_TOGGLE},
+              {"TestBedMode",                   HAPD_ACTION_NEED_TOGGLE},
+              {"HePhyLdpcCodingInPayload",      HAPD_ACTION_NEED_TOGGLE},
+              {"HeMacMsduAckEnabledMpduSupport",HAPD_ACTION_NEED_TOGGLE},
+              {"HeMacMaxAMpduLengthExponent",   HAPD_ACTION_NEED_TOGGLE},
+              {"HeMacOmControlSupport",         HAPD_ACTION_NEED_TOGGLE},
+              {"HtMinMpduStartSpacing",         HAPD_ACTION_NEED_TOGGLE},
+              {"MultibssEnable",                HAPD_ACTION_NEED_TOGGLE},
+              {"HeMcsNssRxMapLessOrEqual80Mhz", HAPD_ACTION_NEED_TOGGLE},
+              {"HeMcsNssTxMapLessOrEqual80Mhz", HAPD_ACTION_NEED_TOGGLE},
+              {"HeMcsNssRxHeMcsMap160Mhz",      HAPD_ACTION_NEED_TOGGLE},
+              {"HeMcsNssTxHeMcsMap160Mhz",      HAPD_ACTION_NEED_TOGGLE},
+              {"VhtMcsSetPart0",                HAPD_ACTION_NEED_TOGGLE},
+              {"VhtMcsSetPart1",                HAPD_ACTION_NEED_TOGGLE},
+              {"HePhyMacNc",                    HAPD_ACTION_NEED_TOGGLE},
+              {"SrCtrlHesigaSpatialReuseVal15", HAPD_ACTION_NEED_TOGGLE},
+              {"HeOperationCohostedBss",        HAPD_ACTION_NEED_TOGGLE},
+              {"HeMuEdcaIePresent",             HAPD_ACTION_NEED_TOGGLE},
+              {"HePhyDcmMaxConstellationTx",    HAPD_ACTION_NEED_TOGGLE},
+              {"HePhyDcmMaxConstellationRx",    HAPD_ACTION_NEED_TOGGLE},
+              {"HePhyDcmMaxNssTx",              HAPD_ACTION_NEED_TOGGLE},
+              {"HePhyDcmMaxNssRx",              HAPD_ACTION_NEED_TOGGLE},
+              {"Ieee80211nAcAxCompat",          HAPD_ACTION_NEED_TOGGLE},
+              {"EnableHeDebugMode",             HAPD_ACTION_NEED_TOGGLE},
+              {"HeMuEdcaAcBeAifsn",             HAPD_ACTION_NEED_TOGGLE},
+              {"HeMuEdcaAcBeEcwmin",            HAPD_ACTION_NEED_TOGGLE},
+              {"HeMuEdcaAcBeEcwmax",            HAPD_ACTION_NEED_TOGGLE},
+              {"HeMuEdcaAcBeTimer",             HAPD_ACTION_NEED_TOGGLE},
+              {"HeMuEdcaAcBkAifsn",             HAPD_ACTION_NEED_TOGGLE},
+              {"HeMuEdcaAcBkAci",               HAPD_ACTION_NEED_TOGGLE},
+              {"HeMuEdcaAcBkEcwmin",            HAPD_ACTION_NEED_TOGGLE},
+              {"HeMuEdcaAcBkEcwmax",            HAPD_ACTION_NEED_TOGGLE},
+              {"HeMuEdcaAcBkTimer",             HAPD_ACTION_NEED_TOGGLE},
+              {"HeMuEdcaAcViEcwmin",            HAPD_ACTION_NEED_TOGGLE},
+              {"HeMuEdcaAcViEcwmax",            HAPD_ACTION_NEED_TOGGLE},
+              {"HeMuEdcaAcViAifsn",             HAPD_ACTION_NEED_TOGGLE},
+              {"HeMuEdcaAcViAci",               HAPD_ACTION_NEED_TOGGLE},
+              {"HeMuEdcaAcViTimer",             HAPD_ACTION_NEED_TOGGLE},
+              {"HeMuEdcaAcVoAifsn",             HAPD_ACTION_NEED_TOGGLE},
+              {"HeMuEdcaAcVoAci",               HAPD_ACTION_NEED_TOGGLE},
+              {"HeMuEdcaAcVoEcwmin",            HAPD_ACTION_NEED_TOGGLE},
+              {"HeMuEdcaAcVoEcwmax",            HAPD_ACTION_NEED_TOGGLE},
+              {"HeMuEdcaAcVoTimer",             HAPD_ACTION_NEED_TOGGLE},
+              {"EnableEhtDebugMode",            HAPD_ACTION_NEED_TOGGLE},
+              {"EhtMacEhtOmControl",            HAPD_ACTION_NEED_TOGGLE},
+              {"EhtMacRestrictedTwt",           HAPD_ACTION_NEED_TOGGLE},
+              {"EhtMacTrigTxopSharingMode1",    HAPD_ACTION_NEED_TOGGLE},
+              {"EhtMacTrigTxopSharingMode2",    HAPD_ACTION_NEED_TOGGLE},
+              {"EhtPhyTrigMuBfPartialBwFb",     HAPD_ACTION_NEED_TOGGLE},
+              {"EhtPhyMaxNc",                   HAPD_ACTION_NEED_TOGGLE},
+              {"EhtMcsMapLessOrEq80MHzRx09",    HAPD_ACTION_NEED_TOGGLE},
+              {"EhtMcsMapLessOrEq80MHzTx09",    HAPD_ACTION_NEED_TOGGLE},
+              {"EhtMcsMapLessOrEq80MHzRx1011",  HAPD_ACTION_NEED_TOGGLE},
+              {"EhtMcsMapLessOrEq80MHzTx1011",  HAPD_ACTION_NEED_TOGGLE},
+              {"EhtMcsMapLessOrEq80MHzRx1213",  HAPD_ACTION_NEED_TOGGLE},
+              {"EhtMcsMapLessOrEq80MHzTx1213",  HAPD_ACTION_NEED_TOGGLE},
+              {"EhtPhyMaxAmpduLenExpExt",       HAPD_ACTION_NEED_TOGGLE},
+              {"EhtPhySuBeamformer",            HAPD_ACTION_NEED_TOGGLE},
+              {"EhtPhySuBeamformee",            HAPD_ACTION_NEED_TOGGLE},
+              {"EhtMacMaxMpduLen",              HAPD_ACTION_NEED_TOGGLE},
+              {"EhtPhyPpeThresholdsPresent",    HAPD_ACTION_NEED_TOGGLE},
+              {"EhtPhyCommonNominalPktPad",     HAPD_ACTION_NEED_TOGGLE},
+              {"SetDynamicMuTypeDownLink",      HAPD_ACTION_NEED_TOGGLE},
+              {"SetDynamicMuTypeUpLink",        HAPD_ACTION_NEED_TOGGLE},
+              {"EhtMacScsTrafficDesc",          HAPD_ACTION_NEED_TOGGLE},
+              {"EhtMldTsfDiff",                 HAPD_ACTION_NEED_TOGGLE},
+              {"EhtMcsMap160MHzRxMcs09",        HAPD_ACTION_NEED_TOGGLE},
+              {"EhtMcsMap160MHzTxMcs09",        HAPD_ACTION_NEED_TOGGLE},
+              {"EhtMcsMap160MHzTxMcs1011",      HAPD_ACTION_NEED_TOGGLE},
+              {"EhtMcsMap160MHzRxMcs1011",      HAPD_ACTION_NEED_TOGGLE},
+              {"EhtMcsMap160MHzTxMcs1213",      HAPD_ACTION_NEED_TOGGLE},
+              {"EhtMcsMap160MHzTxMcs1213",      HAPD_ACTION_NEED_TOGGLE},
+              {"EhtMcsMap320MHzRxMcs09",        HAPD_ACTION_NEED_TOGGLE},
+              {"EhtMcsMap320MHzTxMcs09",        HAPD_ACTION_NEED_TOGGLE},
+              {"EhtMcsMap320MHzRxMcs1011",      HAPD_ACTION_NEED_TOGGLE},
+              {"EhtMcsMap320MHzTxMcs1011",      HAPD_ACTION_NEED_TOGGLE},
+              {"EhtMcsMap320MHzRxMcs1213",      HAPD_ACTION_NEED_TOGGLE},
+              {"EhtMcsMap320MHzTxMcs1213",      HAPD_ACTION_NEED_TOGGLE},
+              {"EhtPhy320MHzIn6GHz",            HAPD_ACTION_NEED_TOGGLE},
+              {"AdvertiseEcsaIe",               HAPD_ACTION_NEED_TOGGLE},
+              {"SetMaxMpduLen",                 HAPD_ACTION_NEED_TOGGLE},
+              {"HePhySuBeamformeeCapable",      HAPD_ACTION_NEED_TOGGLE},
+              {"HePhySuBeamformerCapable",      HAPD_ACTION_NEED_TOGGLE},
+              {"HePhyBeamformeeStsLesOrEq80Mhz",HAPD_ACTION_NEED_TOGGLE},
+              {"HePhyBeamformeeStsGreater80Mhz",HAPD_ACTION_NEED_TOGGLE},
+              {"HePhyDeviceClass",              HAPD_ACTION_NEED_TOGGLE},
+              {"HePhySuPpdu1xHeLtfAnd08UsGi",   HAPD_ACTION_NEED_TOGGLE},
+              {"HePhySuPpduHeMu4xHeLtf08UsGi",  HAPD_ACTION_NEED_TOGGLE},
+              {"HePhyMuBeamformerCapable",      HAPD_ACTION_NEED_TOGGLE},
+              {"HePhyNdpWith4xHeLtfAnd32UsGi",  HAPD_ACTION_NEED_TOGGLE},
+              {"HePhyNg16SuFeedback",           HAPD_ACTION_NEED_TOGGLE},
+              {"HePhyNg16MuFeedback",           HAPD_ACTION_NEED_TOGGLE},
+              {"HePhyNumSoundDimenLeOrEq80Mhz", HAPD_ACTION_NEED_TOGGLE},
+              {"HePhyNumSoundDimenGreater80Mhz",HAPD_ACTION_NEED_TOGGLE},
+              {"HePhyTriggerSuBeamformFeedback",HAPD_ACTION_NEED_TOGGLE},
+              {"HePhyDopplerRx",                HAPD_ACTION_NEED_TOGGLE},
+              {"HePhyDopplerTx",                HAPD_ACTION_NEED_TOGGLE},
+              {"HePhyFullBandwidthUlMuMimo",    HAPD_ACTION_NEED_TOGGLE},
+              {"HePhyPartialBandwidthUlMuMimo", HAPD_ACTION_NEED_TOGGLE},
+              {"HePhyPartialBWExtendedRange",   HAPD_ACTION_NEED_TOGGLE},
+              {"HePhyTriggeredCqiFeedback",     HAPD_ACTION_NEED_TOGGLE},
+              {"HePhyPpeThresholdsPresent",     HAPD_ACTION_NEED_TOGGLE},
+              {"HePhyCodebookSize42SuSupport",  HAPD_ACTION_NEED_TOGGLE},
+              {"HePhyCodebookSize75MuSupport",  HAPD_ACTION_NEED_TOGGLE},
+              {"HePhyPowBoostFactAlphaSupport", HAPD_ACTION_NEED_TOGGLE},
+              {"HeMacOmCtrlMuDisableRxSupport", HAPD_ACTION_NEED_TOGGLE},
+              {"HeOpTxopDurationRtsThreshold",  HAPD_ACTION_NEED_TOGGLE},
+              {"HeMacUl2x996ToneRuSupport",     HAPD_ACTION_NEED_TOGGLE},
+              {"HeMacAckEnabledAggrSupport",    HAPD_ACTION_NEED_TOGGLE},
+              {"HeMacBroadcastTwtSupport",      HAPD_ACTION_NEED_TOGGLE},
+              {"HePhyDcmMaxBw",                 HAPD_ACTION_NEED_TOGGLE},
+              {"HePhyLong16HeSigOfdmSymSupport",HAPD_ACTION_NEED_TOGGLE},
+              {"HeMacNdpFeedbackReportSupport", HAPD_ACTION_NEED_TOGGLE},
+              {"HePhyRx1024QLt242ToneRuSupport",HAPD_ACTION_NEED_TOGGLE},
+              {"HePhyRxFullBwSuUsingMuCompSigb",HAPD_ACTION_NEED_TOGGLE},
+              {"HePhyRxFulBwUsingMuNonComSigb", HAPD_ACTION_NEED_TOGGLE},
+              {"HePhyStbcTxLessThanOrEq80Mhz",  HAPD_ACTION_NEED_TOGGLE},
+              {"HePhyStbcTxGreaterThan80Mhz",   HAPD_ACTION_NEED_TOGGLE},
+              {"HeOperationErSuDisable",        HAPD_ACTION_NEED_TOGGLE},
+              {"HePhyErSuPpdu4xLtf8UsGi",       HAPD_ACTION_NEED_TOGGLE},
+              {"HePhyPreamblePuncturingRx",     HAPD_ACTION_NEED_TOGGLE},
+              {"HeMacMultiTidAggrTxSupport",    HAPD_ACTION_NEED_TOGGLE},
+              {"HeMacMultiTidAggrRxSupport",    HAPD_ACTION_NEED_TOGGLE},
+              {"EhtPhyNumSoundDim80MhzOrBelow", HAPD_ACTION_NEED_TOGGLE},
+              {"EhtPhyNumSoundingDim160Mhz",    HAPD_ACTION_NEED_TOGGLE},
+              {"EhtPhyNumSoundingDim320Mhz",    HAPD_ACTION_NEED_TOGGLE},
+              {"EhtPhyMuBeamformerBw80MhzBelow",HAPD_ACTION_NEED_TOGGLE},
+              {"EhtPhyMuBeamformerBw160Mhz",    HAPD_ACTION_NEED_TOGGLE},
+              {"EhtPhyMuBeamformerBw320Mhz",    HAPD_ACTION_NEED_TOGGLE},
+              {"EhtPhyNdp4xEhtLtfAnd32UsGi",    HAPD_ACTION_NEED_TOGGLE},
+              {"EhtPhyPartialBwUlMuMimo",       HAPD_ACTION_NEED_TOGGLE},
+              {"EhtPhyBeamformeeSs80MhzOrBelow",HAPD_ACTION_NEED_TOGGLE},
+              {"EhtPhyBeamformeeSs160Mhz",      HAPD_ACTION_NEED_TOGGLE},
+              {"EhtPhyBeamformeeSs320Mhz",      HAPD_ACTION_NEED_TOGGLE},
+              {"EhtPhyEhtDupIn6Ghz",            HAPD_ACTION_NEED_TOGGLE},
+              {"EhtPhy20MhzOpStaRxNdpWiderBw",  HAPD_ACTION_NEED_TOGGLE},
+              {"EhtPhyNg16SuFeedback",          HAPD_ACTION_NEED_TOGGLE},
+              {"EhtPhyNg16MuFeedback",          HAPD_ACTION_NEED_TOGGLE},
+              {"EhtPhyCodebookSize42SuFb",      HAPD_ACTION_NEED_TOGGLE},
+              {"EhtPhyCodebookSize755MuFb",     HAPD_ACTION_NEED_TOGGLE},
+              {"EhtPhyTrigSuBfFb",              HAPD_ACTION_NEED_TOGGLE},
+              {"EhtPhyTrigCqiFb",               HAPD_ACTION_NEED_TOGGLE},
+              {"EhtPhyPartialBwDlMuMimo",       HAPD_ACTION_NEED_TOGGLE},
+              {"EhtPhyPsrBasedSr",              HAPD_ACTION_NEED_TOGGLE},
+              {"EhtPhyEhtMuPpdu4xEhtLtf08UsGi", HAPD_ACTION_NEED_TOGGLE},
+              {"EhtPhyRx1024Qam4096QamBel242Ru",HAPD_ACTION_NEED_TOGGLE},
+              {"EhtPhyMaxNumOfSupportedEhtLtfs",HAPD_ACTION_NEED_TOGGLE},
+              {"EhtPhyMcs15",                   HAPD_ACTION_NEED_TOGGLE},
+              {"EhtPhyNonOfdmaMuMimo80MhzBelow",HAPD_ACTION_NEED_TOGGLE},
+              {"EhtPhyNonOfdmaUlMuMimoBw160Mhz",HAPD_ACTION_NEED_TOGGLE},
+              {"EhtPhyNonOfdmaUlMuMimoBw320Mhz",HAPD_ACTION_NEED_TOGGLE},
+              {"SetDynamicMuMinStationsInGroup", HAPD_ACTION_NEED_TOGGLE},
+              {"SetDynamicMuMaxStationsInGroup", HAPD_ACTION_NEED_TOGGLE},
+              {"SetDynamicMuCdbConfig",          HAPD_ACTION_NEED_TOGGLE},
+              {"Rnr6gOpClass137Allowed",         HAPD_ACTION_NEED_TOGGLE},
+              {"RnrTbttMldNonZeroPad",           HAPD_ACTION_NEED_TOGGLE},
+              {"Country3",                       HAPD_ACTION_NEED_TOGGLE},
               ));
 
 static swl_rc_ne whm_mxl_hostapd_getRadParamAction(whm_mxl_hapd_action_e* pOutMappedAction, const char* paramName) {
@@ -320,15 +697,66 @@ SWL_TABLE(sVapCfgParamsActionMap,
               {"DynamicMulticastRate",          HAPD_ACTION_NEED_TOGGLE},
               {"DisableBeaconProtection",       HAPD_ACTION_NEED_TOGGLE},
               {"SetBridgeMode",                 HAPD_ACTION_NEED_TOGGLE},
+              {"MboCellAware",                  HAPD_ACTION_NEED_TOGGLE},
+              {"Set11nProtection",              HAPD_ACTION_NEED_TOGGLE},
+              {"EmlCapabTransitionTimeout",     HAPD_ACTION_NEED_TOGGLE},
+              {"ApProtectedKeepAliveRequired",  HAPD_ACTION_NEED_TOGGLE},
+              {"MldMediumsyncPresent",          HAPD_ACTION_NEED_TOGGLE},
+              {"MldMediumsyncDuration",         HAPD_ACTION_NEED_TOGGLE},
+              {"MldMediumsyncOfdmedthresh",     HAPD_ACTION_NEED_TOGGLE},
+              {"MldMediumsyncMaxtxop",          HAPD_ACTION_NEED_TOGGLE},
+              {"MloT2lmSupport",                HAPD_ACTION_NEED_TOGGLE},
+              {"WnmBssTransQueryAutoresp",      HAPD_ACTION_NEED_TOGGLE},
+              {"RrmNeighRpt",                   HAPD_ACTION_NEED_TOGGLE},
+              {"WmmAcVICWMin",                  HAPD_ACTION_NEED_TOGGLE},
+              {"WmmAcVOCWMin",                  HAPD_ACTION_NEED_TOGGLE},
+              {"WmmAcBECWMin",                  HAPD_ACTION_NEED_TOGGLE},
+              {"WmmAcBKCWMin",                  HAPD_ACTION_NEED_TOGGLE},
+              {"WmmAcVICWMax",                  HAPD_ACTION_NEED_TOGGLE},
+              {"WmmAcVOCWMax",                  HAPD_ACTION_NEED_TOGGLE},
+              {"WmmAcBECWMax",                  HAPD_ACTION_NEED_TOGGLE},
+              {"WmmAcBKCWMax",                  HAPD_ACTION_NEED_TOGGLE},
+              {"WmmAcVIAifs",                   HAPD_ACTION_NEED_TOGGLE},
+              {"WmmAcVOAifs",                   HAPD_ACTION_NEED_TOGGLE},
+              {"WmmAcBEAifs",                   HAPD_ACTION_NEED_TOGGLE},
+              {"WmmAcBKAifs",                   HAPD_ACTION_NEED_TOGGLE},
+              {"WmmAcVITXOP",                   HAPD_ACTION_NEED_TOGGLE},
+              {"WmmAcVOTXOP",                   HAPD_ACTION_NEED_TOGGLE},
+              {"WmmAcBETXOP",                   HAPD_ACTION_NEED_TOGGLE},
+              {"WmmAcBKTXOP",                   HAPD_ACTION_NEED_TOGGLE},
+              {"WmmAcVIAcm",                    HAPD_ACTION_NEED_TOGGLE},
+              {"WmmAcVOAcm",                    HAPD_ACTION_NEED_TOGGLE},
+              {"WmmAcBEAcm",                    HAPD_ACTION_NEED_TOGGLE},
+              {"WmmAcBKAcm",                    HAPD_ACTION_NEED_TOGGLE},
+              {"TxQueueVICWMin",                HAPD_ACTION_NEED_TOGGLE},
+              {"TxQueueVOCWMin",                HAPD_ACTION_NEED_TOGGLE},
+              {"TxQueueBECWMin",                HAPD_ACTION_NEED_TOGGLE},
+              {"TxQueueBKCWMin",                HAPD_ACTION_NEED_TOGGLE},
+              {"TxQueueVICWMax",                HAPD_ACTION_NEED_TOGGLE},
+              {"TxQueueVOCWMax",                HAPD_ACTION_NEED_TOGGLE},
+              {"TxQueueBECWMax",                HAPD_ACTION_NEED_TOGGLE},
+              {"TxQueueBKCWMax",                HAPD_ACTION_NEED_TOGGLE},
+              {"TxQueueVIAifs",                 HAPD_ACTION_NEED_TOGGLE},
+              {"TxQueueVOAifs",                 HAPD_ACTION_NEED_TOGGLE},
+              {"TxQueueBEAifs",                 HAPD_ACTION_NEED_TOGGLE},
+              {"TxQueueBKAifs",                 HAPD_ACTION_NEED_TOGGLE},
+              {"GasCBDelay",                    HAPD_ACTION_NEED_TOGGLE},
               //Actions applied with sighup to hostpad
+              {"RadiusSecretKey",               HAPD_ACTION_NEED_SIGHUP},
               {"OWETransitionBSSID",            HAPD_ACTION_NEED_SIGHUP},
               {"OWETransitionSSID",             HAPD_ACTION_NEED_SIGHUP},
               {"ClientDisallow",                HAPD_ACTION_NEED_SIGHUP},
+              {"DisablePbac",                   HAPD_ACTION_NEED_SIGHUP},
+              {"SetAggrConfig",                 HAPD_ACTION_NEED_SIGHUP},
+              {"GroupMgmtCipher",               HAPD_ACTION_NEED_SIGHUP},
+              {"GroupCipher",                   HAPD_ACTION_NEED_SIGHUP},
               //Actions applied with update beacon
               {"BssTransition",                 HAPD_ACTION_NEED_UPDATE_BEACON},
               {"ApMaxInactivity",               HAPD_ACTION_NEED_UPDATE_BEACON},
               //Action applied with update hostapd conf
               {"MgmtFramePowerControl",         HAPD_ACTION_NEED_UPDATE_CONF},
+              //Action applied with the Reconf of the AccessPoint
+              {"EhtMacEpcsPrioAccess",          HAPD_ACTION_NEED_RECONF},
               ));
 
 static swl_rc_ne whm_mxl_hostapd_getVapParamAction(whm_mxl_hapd_action_e* pOutMappedAction, const char* paramName) {
@@ -458,6 +886,18 @@ swl_rc_ne whm_mxl_determineEpParamAction(T_EndPoint* pEP, const char* paramName)
  */
 swl_rc_ne whm_mxl_restartHapd(T_Radio* pRad) {
     ASSERT_NOT_NULL(pRad, SWL_RC_INVALID_PARAM, ME, "No Radio Mapped");
+    return s_doHapdRestart(pRad, NULL);
+}
+
+/**
+ * @brief Request hostapd restart (Kill and Restart) from pwhm state machine for MLO config
+ *
+ * @param pRad radio
+ * @return return code of executed action.
+ */
+swl_rc_ne whm_mxl_mlo_restartHapd(T_Radio* pRad) {
+    ASSERT_NOT_NULL(pRad, SWL_RC_INVALID_PARAM, ME, "No Radio Mapped");
+    wld_secDmn_setRestartNeeded(pRad->hostapd, true);
     return s_doHapdRestart(pRad, NULL);
 }
 
@@ -692,6 +1132,127 @@ swl_rc_ne whm_mxl_handleMbssidOverride(T_Radio* pRad, bool overideMbssid) {
     return SWL_RC_OK;
 }
 
+swl_rc_ne whm_mxl_configureSaeExt(T_AccessPoint* pAP) {
+    ASSERT_NOT_NULL(pAP, SWL_RC_INVALID_PARAM, ME, "No pAP Mapped");
+    T_Radio* pRad = pAP->pRadio;
+    ASSERT_NOT_NULL(pRad, SWL_RC_INVALID_PARAM, ME, "No Radio Mapped");
+
+    const char* secApParams[] = {
+        "wpa_key_mgmt"
+    };
+
+    whm_mxl_set_vendorMultipleParams(pAP, secApParams, SWL_ARRAY_SIZE(secApParams));
+    whm_mxl_toggleHapd(pRad);
+    return SWL_RC_OK;
+}
+
+swl_rc_ne whm_mxl_hostapd_setMldParams(T_AccessPoint* pAP) {
+    ASSERT_NOT_NULL(pAP, SWL_RC_INVALID_PARAM, ME, "No pAP Mapped");
+
+    const char* mldParams[] = {
+        "mlo_enable"
+    };
+
+    whm_mxl_set_vendorMultipleParams(pAP, mldParams, SWL_ARRAY_SIZE(mldParams));
+    return SWL_RC_OK;
+}
+
+swl_rc_ne whm_mxl_toggleWPA3PersonalCompatibility(T_AccessPoint* pAP) {
+    ASSERT_NOT_NULL(pAP, SWL_RC_INVALID_PARAM, ME, "No pAP Mapped");
+    T_Radio* pRad = pAP->pRadio;
+    ASSERT_NOT_NULL(pRad, SWL_RC_INVALID_PARAM, ME, "No Radio Mapped");
+    ASSERT_FALSE((pRad->status == RST_ERROR) || (pRad->status == RST_UNKNOWN), SWL_RC_INVALID_STATE, ME, "%s: Invalid radio state(%d)", pRad->Name, pRad->status);
+    ASSERTI_TRUE(wld_secDmn_isAlive(pRad->hostapd), SWL_RC_ERROR, ME, "hostapd not active");
+
+    const char* secApParams[] = {
+        "wpa", "wpa_key_mgmt", "rsn_pairwise", "group_cipher",
+        "ieee80211w", "sae_pwe", "sae_require_mfp",
+        "rsn_override_key_mgmt", "rsn_override_pairwise",
+        "rsn_override_mfp", "rsn_override_key_mgmt_2",
+        "rsn_override_pairwise_2", "rsn_override_mfp_2"
+    };
+
+    whm_mxl_set_vendorMultipleParams(pAP, secApParams, SWL_ARRAY_SIZE(secApParams));
+    whm_mxl_sighupHapd(pRad);
+    return SWL_RC_OK;
+}
+
+static bool s_isParamChanged(swl_mapChar_t* pCurrVapParams,
+                              const char* param, const char* newValue) {
+    ASSERTS_NOT_NULL(param, false, ME, "NULL");
+    ASSERTS_NOT_NULL(pCurrVapParams, false, ME, "NULL");
+    const char* oldValue = swl_mapChar_get(pCurrVapParams, (char*) param);
+    ASSERTS_FALSE(swl_str_matches(oldValue, newValue), false, ME, "same value");
+    return true;
+}
+
+static bool s_isAnyMultipleParamsChanged(swl_mapChar_t* pCurrVapParams, swl_mapChar_t* pNewVapParams,
+                                    const char* params[], uint32_t nParams) {
+    ASSERTS_NOT_NULL(pCurrVapParams, false, ME, "NULL");
+    ASSERTS_NOT_NULL(pNewVapParams, false, ME, "NULL");
+    bool changed = false;
+    for (uint32_t i = 0; i < nParams; i++) {
+        changed |= s_isParamChanged(pCurrVapParams, params[i], swl_mapChar_get(pNewVapParams, (char*) params[i]));
+    }
+    return changed;
+}
+
+static whm_mxl_config_flow_e s_chooseGeneralConfigFlow(T_AccessPoint* pAP) {
+    ASSERT_NOT_NULL(pAP, WHM_MXL_CONFIG_FLOW_GENERIC, ME, "No pAP Mapped");
+    // Map generic parameters here to be configured by reconf
+    return WHM_MXL_CONFIG_FLOW_GENERIC;
+}
+
+
+static whm_mxl_config_flow_e s_chooseSecurityConfigFlow(T_AccessPoint* pAP) {
+    ASSERT_NOT_NULL(pAP, WHM_MXL_CONFIG_FLOW_GENERIC, ME, "No pAP Mapped");
+    T_Radio* pRad = pAP->pRadio;
+    ASSERT_NOT_NULL(pRad, WHM_MXL_CONFIG_FLOW_GENERIC, ME, "No pRad Mapped");
+    /* Schedule reconf only when hostapd is running */
+    ASSERTI_TRUE(wld_secDmn_isEnabled(pRad->hostapd), WHM_MXL_CONFIG_FLOW_GENERIC, ME, "hostapd is not running");
+    wld_hostapd_config_t* pCurrentConfig = NULL;
+    bool ret = wld_hostapd_loadConfig(&pCurrentConfig, pRad->hostapd->cfgFile);
+    ASSERTI_TRUE(ret, WHM_MXL_CONFIG_FLOW_GENERIC, ME, "no saved current config");
+    swl_mapChar_t* pCurrVapParams = wld_hostapd_getConfigMapByBssid(pCurrentConfig, (swl_macBin_t*) pAP->pSSID->BSSID);
+    swl_mapChar_t newVapParams;
+    swl_mapChar_t* pNewVapParams = &newVapParams;
+    swl_mapChar_init(pNewVapParams);
+    wld_hostapd_cfgFile_setVapConfig(pAP, pNewVapParams, (swl_mapChar_t*) NULL);
+
+    const char* secVapParams[] = {
+        "wpa", "wpa_group_rekey", "wps_state"
+    };
+    bool anyChanged = s_isAnyMultipleParamsChanged(pCurrVapParams, pNewVapParams, secVapParams, SWL_ARRAY_SIZE(secVapParams));
+
+    swl_mapChar_cleanup(pNewVapParams);
+    wld_hostapd_deleteConfig(pCurrentConfig);
+
+    return (anyChanged ? WHM_MXL_CONFIG_FLOW_RECONF : WHM_MXL_CONFIG_FLOW_GENERIC);
+}
+
+whm_mxl_config_flow_e whm_mxl_chooseVapConfigFlow(T_AccessPoint* pAP, whm_mxl_config_type_e type) {
+    ASSERT_NOT_NULL(pAP, WHM_MXL_CONFIG_FLOW_GENERIC, ME, "No pAP Mapped");
+    whm_mxl_config_flow_e flow = WHM_MXL_CONFIG_FLOW_GENERIC;
+
+    switch (type) {
+        case WHM_MXL_CONFIG_TYPE_GENRAL: {
+            flow = s_chooseGeneralConfigFlow(pAP);
+            break;
+        }
+        case WHM_MXL_CONFIG_TYPE_SECURITY: {
+            flow = s_chooseSecurityConfigFlow(pAP);
+            break;
+        }
+        default: {
+            SAH_TRACEZ_NOTICE(ME, "%s: Invalid config type(%d)", pAP->alias, type);
+            break;
+        }
+
+    }
+
+    return flow;
+}
+
 swl_rc_ne whm_mxl_updateSsidAdvertisement(T_AccessPoint* pAP) {
     ASSERT_NOT_NULL(pAP, SWL_RC_INVALID_PARAM, ME, "pAP is NULL");
     T_Radio* pRad = pAP->pRadio;
@@ -719,6 +1280,64 @@ swl_rc_ne whm_mxl_hiddenSsidUpdate(T_AccessPoint* pAP) {
     wld_ap_hostapd_reloadSecKey(pAP, "reload hidden ssid sec key");
     return whm_mxl_toggleHapd(pRad);
 }
+
+swl_rc_ne whm_mxl_updateMaxAssociatedDevices(T_AccessPoint* pAP) {
+    ASSERT_NOT_NULL(pAP, SWL_RC_INVALID_PARAM, ME, "pAP is NULL");
+    T_Radio* pRad = pAP->pRadio;
+    ASSERT_NOT_NULL(pRad, SWL_RC_INVALID_PARAM, ME, "pRad is NULL");
+    ASSERTI_FALSE((pRad->status == RST_ERROR) || (pRad->status == RST_UNKNOWN), SWL_RC_INVALID_STATE, ME, "%s: Invalid radio state(%d)", pRad->Name, pRad->status);
+    ASSERTI_TRUE(wld_secDmn_isAlive(pRad->hostapd), SWL_RC_ERROR, ME, "hostapd not active");
+    SAH_TRACEZ_NOTICE(ME, "%s: Updating Number of Max associated Devices", pAP->alias);
+    if(pAP->ActiveAssociatedDeviceNumberOfEntries > pAP->MaxStations) {
+        swl_mapChar_t newVapParams;
+        swl_mapChar_t* pNewVapParams = &newVapParams;
+        swl_mapChar_init(pNewVapParams);
+        wld_hostapd_cfgFile_setVapConfig(pAP, pNewVapParams, (swl_mapChar_t*) NULL);
+        wld_ap_hostapd_setParamValue(pAP, "max_num_sta", swl_mapChar_get(pNewVapParams, "max_num_sta"), "update max_num_sta");
+        swl_mapChar_cleanup(pNewVapParams);
+        return whm_mxl_toggleHapd(pRad);
+    }
+    return SWL_RC_OK;
+}
+
+#ifdef CONFIG_VENDOR_MXL_PROPRIETARY
+/**
+ * @brief configure BG ACS Scan Interval
+ *
+ * @param pRad radio
+ * @param bgAcsInterval BG ACS interval in seconds
+ * @return SWL_RC_OK when executed successfully. Otherwise matching SWL error.
+ */
+swl_rc_ne whm_mxl_configureBgAcs(T_Radio* pRad, uint16_t bgAcsInterval) {
+    ASSERT_NOT_NULL(pRad, SWL_RC_INVALID_PARAM, ME, "NULL");
+    T_AccessPoint* masterVap = wld_rad_getFirstVap(pRad);
+    ASSERT_NOT_NULL(masterVap, SWL_RC_INVALID_PARAM, ME, "masterVap is NULL");
+    bool ctrlIfaceReady = wld_wpaCtrlInterface_isReady(masterVap->wpaCtrlInterface);
+
+    if (ctrlIfaceReady) {
+        char interval[256] = {0};
+        swl_str_catFormat(interval, sizeof(interval), "%u", bgAcsInterval);
+        /* Set bg acs interval in minutes */
+        wld_ap_hostapd_setParamValue(masterVap, "acs_bgscan_interval", interval, "bg_acs_interval");
+    }
+
+    /* Check if we can configure BG ACS Scan on the fly */
+    if (pRad->autoChannelEnable || !bgAcsInterval) {
+        if (wld_rad_isActive(pRad) && ctrlIfaceReady) {
+            char cmd[256] = {0};
+            /* Command format: -i <ifname> ACS_BG_SCAN_INTERVAL <timeout_in_mins> */
+            swl_str_catFormat(cmd, sizeof(cmd), "ACS_BG_SCAN_INTERVAL %u", bgAcsInterval);
+            whm_mxl_hostapd_sendCommand(masterVap, cmd, "bg_acs_interval");
+        }
+    } else {
+        SAH_TRACEZ_NOTICE(ME, "%s: Unable to conifgure BG ACS on the fly (acs %d interval %u)", pRad->Name, pRad->autoChannelEnable, bgAcsInterval);
+    }
+
+    s_doHapdConfUpdate(pRad, NULL);
+
+    return SWL_RC_OK;
+}
+#endif /* CONFIG_VENDOR_MXL_PROPRIETARY */
 
 /**
  * @brief wraper for the generic pwhm send hostapd command

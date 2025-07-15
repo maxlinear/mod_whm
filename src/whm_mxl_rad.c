@@ -27,6 +27,7 @@
 #include "wld/wld_ap_nl80211.h"
 #include "wld/wld_linuxIfUtils.h"
 #include "wld/wld_rad_hostapd_api.h"
+#include "wld/wld_eventing.h"
 
 #include "whm_mxl_module.h"
 #include "whm_mxl_utils.h"
@@ -37,6 +38,7 @@
 #include "whm_mxl_cfgActions.h"
 #include "whm_mxl_vap.h"
 #include "whm_mxl_wmm.h"
+#include "whm_mxl_reconfMngr.h"
 
 #include <vendor_cmds_copy.h>
 
@@ -89,7 +91,6 @@ int whm_mxl_rad_supports(T_Radio* pRad, char* buf _UNUSED, int bufsize _UNUSED) 
     */
 
     /* Set OWE as supported for all bands */
-    /* Set OWE as supported for all bands */
     if (wld_rad_is_24ghz(pRad)) {
         wld_rad_addSuppDrvCap(pRad, SWL_FREQ_BAND_2_4GHZ, "OWE");
     } else if (wld_rad_is_5ghz(pRad)) {
@@ -115,6 +116,26 @@ int whm_mxl_rad_supports(T_Radio* pRad, char* buf _UNUSED, int bufsize _UNUSED) 
     return rc;
 }
 
+static void s_vapStatusCb(wld_vap_status_change_event_t* event) {
+    ASSERT_NOT_NULL(event, , ME, "NULL");
+    T_AccessPoint* pAP = event->vap;
+    ASSERT_NOT_NULL(pAP, , ME, "NULL");
+    T_SSID* pSSID = pAP->pSSID;
+    ASSERT_NOT_NULL(pSSID, , ME, "NULL");
+    T_Radio* pRad = pAP->pRadio;
+    ASSERT_NOT_NULL(pRad, , ME, "NULL");
+
+    if ((pAP->status == APSTI_ENABLED) && (pSSID->status == RST_UP)) {
+        whm_mxl_vap_postUpActions(pAP);
+    } else if (pSSID->status == RST_DOWN) {
+        whm_mxl_vap_postDownActions(pAP);
+    }
+}
+
+static wld_event_callback_t s_vapStatusEventCb = {
+    .callback = (wld_event_callback_fun) s_vapStatusCb,
+};
+
 int whm_mxl_rad_createHook(T_Radio* pRad) {
     ASSERT_NOT_NULL(pRad, SWL_RC_INVALID_PARAM, ME, "NULL");
     swl_rc_ne rc;
@@ -125,20 +146,54 @@ int whm_mxl_rad_createHook(T_Radio* pRad) {
     ASSERT_NOT_NULL(pRad->vendorData, SWL_RC_INVALID_PARAM, ME, "NULL");
     s_mxl_rad_init_vendordata(pRad);
 
+    whm_mxl_reconfMngr_init(pRad);
+
     // set vendor events handler
     SAH_TRACEZ_INFO(ME, "%s: Set vendor event handler", pRad->Name);
     rc = mxl_evt_setVendorEvtHandlers(pRad);
 
+    // Register to event queues
+    wld_event_add_callback(gWld_queue_vap_onStatusChange, &s_vapStatusEventCb);
+    whm_mxl_registerToWdsEvent();
+
     return rc;
+}
+
+static bool s_isHapdDisableRequired(chanmgt_rad_state radDetailedState) {
+    return ((radDetailedState == CM_RAD_UP) || (radDetailedState == CM_RAD_FG_CAC) || (radDetailedState == CM_RAD_CONFIGURING));
+}
+
+static void s_syncOnRadDynamicEnable(T_Radio* pRad) {
+    ASSERT_NOT_NULL(pRad, , ME, "NULL");
+    bool isHapdReady = wld_secDmn_isRunning(pRad->hostapd) && wld_rad_firstCommitFinished(pRad);
+    bool isSyncAllowed = (whm_mxl_utils_numOfGrpMembers(pRad) > 1);
+    ASSERTI_TRUE((isHapdReady && isSyncAllowed), , ME, "%s: sync conditions (%d / %d)", pRad->Name, isHapdReady, isSyncAllowed);
+    SAH_TRACEZ_INFO(ME, "%s: rad dynamically enabled - schedule sync", pRad->Name);
+    whm_mxl_rad_setCtrlSockSyncNeeded(pRad, true);
+    whm_mxl_rad_requestSync(pRad);
 }
 
 int whm_mxl_rad_enable(T_Radio* pRad, int val, int set) {
     int ret = val;
+    chanmgt_rad_state radDetState = CM_RAD_UNKNOWN;
+    swl_rc_ne rc;
+    if((set & SET) && !(set & DIRECT)) {
+        if (val) {
+            s_syncOnRadDynamicEnable(pRad);
+        }
+    }
     if((set & DIRECT) && (set & SET)) {
         // let hostapd/wpa_supp manage the main iface enabling
         if(!val) {
             SAH_TRACEZ_INFO(ME, "%s: rad enable %d", pRad->Name, val);
             wld_linuxIfUtils_setState(wld_rad_getSocket(pRad), pRad->Name, false);
+            if (wld_secDmn_isRunning(pRad->hostapd)) {
+                rc = whm_mxl_hapd_getRadState(pRad, &radDetState);
+                if (swl_rc_isOk(rc) && s_isHapdDisableRequired(radDetState)) {
+                    // explicitly disable hostapd to sync with driver state of the interface
+                    wld_rad_hostapd_disable(pRad);
+                }
+            }
         }
     } else {
         CALL_NL80211_FTA_RET(ret, mfn_wrad_enable, pRad, val, set);
@@ -146,13 +201,20 @@ int whm_mxl_rad_enable(T_Radio* pRad, int val, int set) {
     return ret;
 }
 
-void whm_mxl_rad_destroyHook(T_Radio* pRad) {
-    ASSERT_NOT_NULL(pRad, , ME, "NULL");
+static void s_deinitRadVendorData(T_Radio* pRad) {
     mxl_VendorData_t* vendorData = mxl_rad_getVendorData(pRad);
     ASSERT_NOT_NULL(vendorData, , ME, "NULL");
+    free(vendorData);
+}
+
+void whm_mxl_rad_destroyHook(T_Radio* pRad) {
+    ASSERT_NOT_NULL(pRad, , ME, "NULL");
+    wld_event_remove_callback(gWld_queue_vap_onStatusChange, &s_vapStatusEventCb);
+    whm_mxl_unregisterToWdsEvent();
+    whm_mxl_reconfMngr_deinit(pRad);
     whm_mxl_rad_delVap_timer_deinit(pRad);
     mxl_monitor_deinit(pRad);
-    free(vendorData);
+    s_deinitRadVendorData(pRad);
     CALL_NL80211_FTA(mfn_wrad_destroy_hook, pRad);
 }
 
@@ -497,6 +559,19 @@ amxd_status_t _whm_mxl_rad_validateDfsDebugChan_pvf(amxd_object_t* _UNUSED,
     }
     return amxd_status_invalid_value;
 }
+
+amxd_status_t _whm_mxl_rad_validateZwdfsDebugChan_pvf(amxd_object_t* _UNUSED,
+                                                         amxd_param_t* param _UNUSED,
+                                                         amxd_action_t reason _UNUSED,
+                                                         const amxc_var_t* const args,
+                                                         amxc_var_t* const retval _UNUSED,
+                                                         void* priv _UNUSED) {
+    int newVal = amxc_var_dyncast(int32_t, args);
+    if ((newVal >= ZWDFS_DEBUG_CHAN_MIN && newVal <= ZWDFS_DEBUG_CHAN_MAX) || newVal == -1) {
+        return amxd_status_ok;
+    }
+    return amxd_status_invalid_value;
+}
 #endif /* CONFIG_VENDOR_MXL_PROPRIETARY */
 
 amxd_status_t _whm_mxl_rad_validateFirstNonDfs_pvf(amxd_object_t* object,
@@ -750,6 +825,20 @@ static void s_setDfsChStateFile_pwf(void* priv _UNUSED, amxd_object_t* object, a
     SAH_TRACEZ_OUT(ME);
 }
 
+static void s_setCountryThird_pwf(void* priv _UNUSED, amxd_object_t* object, amxd_param_t* param, const amxc_var_t* const newParamValues) {
+    SAH_TRACEZ_IN(ME);
+    /* WiFi.Radio.{}.Vendor */
+    amxd_object_t* radObj = amxd_object_get_parent(object);
+    T_Radio* pRad = wld_rad_fromObj(radObj);
+    ASSERT_NOT_NULL(pRad, , ME, "No Radio Mapped");
+    char* country = amxc_var_dyncast(cstring_t, newParamValues);
+    if(whm_mxl_isCertModeEnabled()) {
+        whm_mxl_determineRadParamAction(pRad, amxd_param_get_name(param), country);
+    }
+    free(country);
+    SAH_TRACEZ_OUT(ME);
+}
+
 #ifdef CONFIG_VENDOR_MXL_PROPRIETARY
 static void s_setDfsDebugChan_pwf(void* priv _UNUSED, amxd_object_t* object, amxd_param_t* param, const amxc_var_t* const newParamValues) {
     SAH_TRACEZ_IN(ME);
@@ -763,6 +852,20 @@ static void s_setDfsDebugChan_pwf(void* priv _UNUSED, amxd_object_t* object, amx
     whm_mxl_determineRadParamAction(pRad, amxd_param_get_name(param), newValStr);
     SAH_TRACEZ_OUT(ME);
 }
+
+static void s_setZwdfsDebugChan_pwf(void* priv _UNUSED, amxd_object_t* object, amxd_param_t* param, const amxc_var_t* const newParamValues) {
+    SAH_TRACEZ_IN(ME);
+    /* WiFi.Radio.{}.Vendor */
+    amxd_object_t* radObj = amxd_object_get_parent(object);
+    T_Radio* pRad = wld_rad_fromObj(radObj);
+    ASSERT_NOT_NULL(pRad, , ME, "No Radio Mapped");
+    int zwdfsDebugChan = amxc_var_dyncast(int32_t, newParamValues);
+    char newValStr[64] = {0};
+    swl_str_catFormat(newValStr, sizeof(newValStr), "%d", zwdfsDebugChan);
+    whm_mxl_determineRadParamAction(pRad, amxd_param_get_name(param), newValStr);
+    SAH_TRACEZ_OUT(ME);
+}
+
 #endif /* CONFIG_VENDOR_MXL_PROPRIETARY */
 
 static void s_setSubBandDFS_pwf(void* priv _UNUSED, amxd_object_t* object, amxd_param_t* param, const amxc_var_t* const newParamValues) {
@@ -812,6 +915,49 @@ static void s_setRadioBoolVendorParam_pwf(void* priv _UNUSED, amxd_object_t* obj
     ASSERT_NOT_NULL(pRad, , ME, "No Radio Mapped");
     bool newVal = amxc_var_dyncast(bool, newParamValues);
     whm_mxl_determineRadParamAction(pRad, amxd_param_get_name(param), (newVal ? "1" : "0"));
+    SAH_TRACEZ_OUT(ME);
+}
+
+static void s_setRadioBoolCertVendorParam_pwf(void* priv _UNUSED, amxd_object_t* object, amxd_param_t* param, const amxc_var_t* const newParamValues) {
+    SAH_TRACEZ_IN(ME);
+    /* WiFi.Radio.{}.Vendor */
+    amxd_object_t* radObj = amxd_object_get_parent(object);
+    T_Radio* pRad = wld_rad_fromObj(radObj);
+    ASSERT_NOT_NULL(pRad, , ME, "No Radio Mapped");
+    bool newVal = amxc_var_dyncast(bool, newParamValues);
+    if(whm_mxl_isCertModeEnabled()) {
+        whm_mxl_determineRadParamAction(pRad, amxd_param_get_name(param), (newVal ? "1" : "0"));
+    }
+    SAH_TRACEZ_OUT(ME);
+}
+
+static void s_setRadioUint32CertVendorParam_pwf(void* priv _UNUSED, amxd_object_t* object, amxd_param_t* param, const amxc_var_t* const newParamValues) {
+    SAH_TRACEZ_IN(ME);
+    /* WiFi.Radio.{}.Vendor */
+    amxd_object_t* radObj = amxd_object_get_parent(object);
+    T_Radio* pRad = wld_rad_fromObj(radObj);
+    ASSERT_NOT_NULL(pRad, , ME, "No Radio Mapped");
+    uint32_t newVal = amxc_var_dyncast(uint32_t, newParamValues);
+    char newValStr[64] = {0};
+    swl_str_catFormat(newValStr, sizeof(newValStr), "%u", newVal);
+    if(whm_mxl_isCertModeEnabled()) {
+        whm_mxl_determineRadParamAction(pRad, amxd_param_get_name(param), newValStr);
+    }
+    SAH_TRACEZ_OUT(ME);
+}
+
+static void s_setRadioInt32CertVendorParam_pwf(void* priv _UNUSED, amxd_object_t* object, amxd_param_t* param, const amxc_var_t* const newParamValues) {
+    SAH_TRACEZ_IN(ME);
+    /* WiFi.Radio.{}.Vendor */
+    amxd_object_t* radObj = amxd_object_get_parent(object);
+    T_Radio* pRad = wld_rad_fromObj(radObj);
+    ASSERT_NOT_NULL(pRad, , ME, "No Radio Mapped");
+    int32_t newVal = amxc_var_dyncast(int32_t, newParamValues);
+    char newValStr[64] = {0};
+    swl_str_catFormat(newValStr, sizeof(newValStr), "%d", newVal);
+    if(whm_mxl_isCertModeEnabled()) {
+        whm_mxl_determineRadParamAction(pRad, amxd_param_get_name(param), newValStr);
+    }
     SAH_TRACEZ_OUT(ME);
 }
 
@@ -900,22 +1046,29 @@ amxd_status_t _whm_mxl_rad_debug(amxd_object_t* object,
 
     amxc_var_init(retval);
     amxc_var_set_type(retval, AMXC_VAR_ID_HTABLE);
-    if((amxd_object_get_type(wifiRadObj) != amxd_object_instance) ||
+    if ((amxd_object_get_type(wifiRadObj) != amxd_object_instance) ||
        (!debugIsRadPointer((T_Radio*) wifiRadObj->priv))) {
         amxc_var_add_key(cstring_t, retval, "Error", "Invalid rad object");
         return amxd_status_ok;
     }
     T_Radio* pRad = (T_Radio*) wifiRadObj->priv;
+    if (!pRad) {
+        amxc_var_add_key(cstring_t, retval, "Error", "Radio is NULL");
+        return amxd_status_ok;
+    }
     const char* feature = GET_CHAR(args, "op");
 
-    if(swl_str_matches(feature, "StaScanTime")) {
+    if (swl_str_matches(feature, "StaScanTime")) {
         mxl_monitor_getStaScanTimeOut(pRad);
         mxl_VendorData_t* vendorData = mxl_rad_getVendorData(pRad);
         ASSERT_NOT_NULL(vendorData, amxd_status_invalid_value, ME, "vendorData NULL");
         amxc_var_add_key(int32_t, retval, "StaScanTime", vendorData->naSta.scanTimeout);
         amxc_var_add_key(cstring_t, retval, "Status", "executed command");
-    } else if(swl_str_matches(feature, "NaStaMon")) {
+    } else if (swl_str_matches(feature, "NaStaMon")) {
         whm_mxl_monitor_updateMonStats(pRad);
+        amxc_var_add_key(cstring_t, retval, "Status", "executed command");
+    } else if (swl_str_matches(feature, "CommitReconfFsm")) {
+        whm_mxl_reconfMngr_doCommit(pRad);
         amxc_var_add_key(cstring_t, retval, "Status", "executed command");
     } else {
         //help display
@@ -923,6 +1076,7 @@ amxd_status_t _whm_mxl_rad_debug(amxd_object_t* object,
         amxc_var_t* opMap = amxc_var_add_key(amxc_htable_t, retval, "op", NULL);
         amxc_var_add_key(cstring_t, opMap, "StaScanTime", "To trigger a LTQ_NL80211_VENDOR_SUBCMD_GET_UNCONNECTED_STA_SCAN_TIME subcmd");
         amxc_var_add_key(cstring_t, opMap, "NaStaMon", "To trigger LTQ_NL80211_VENDOR_SUBCMD_GET_UNCONNECTED_STA subcmd");
+        amxc_var_add_key(cstring_t, opMap, "CommitReconfFsm", "To trigger a dummy commit to the Reconf FSM");
     }
 
     return amxd_status_ok;
@@ -980,6 +1134,7 @@ SWLA_DM_HDLRS(sRadVendorDmHdlrs,
                   SWLA_DM_PARAM_HDLR("DfsChStateFile", s_setDfsChStateFile_pwf),
 #ifdef CONFIG_VENDOR_MXL_PROPRIETARY
                   SWLA_DM_PARAM_HDLR("DfsDebugChan", s_setDfsDebugChan_pwf),
+                  SWLA_DM_PARAM_HDLR("ZwdfsDebugChan", s_setZwdfsDebugChan_pwf),
 #endif /* CONFIG_VENDOR_MXL_PROPRIETARY */
                   SWLA_DM_PARAM_HDLR("SubBandDFS", s_setSubBandDFS_pwf),
                   SWLA_DM_PARAM_HDLR("TwtResponderSupport", s_setTwtResponderSupport_pwf),
@@ -994,7 +1149,159 @@ SWLA_DM_HDLRS(sRadVendorDmHdlrs,
                   SWLA_DM_PARAM_HDLR("SetCcaTh", s_setCcaTh_pwf),
                   SWLA_DM_PARAM_HDLR("BackgroundCac", s_setBackgroundCacTh_pwf),
                   SWLA_DM_PARAM_HDLR("FirstNonDfs", s_setFirstNonDfs_pwf),
-                  SWLA_DM_PARAM_HDLR("PunctureBitMap", s_setPunctureBitMap_pwf))
+                  SWLA_DM_PARAM_HDLR("PunctureBitMap", s_setPunctureBitMap_pwf),
+		          SWLA_DM_PARAM_HDLR("TestBedMode", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("HePhyLdpcCodingInPayload", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("HeMacMsduAckEnabledMpduSupport", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("HeMacOmControlSupport", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("HtMinMpduStartSpacing", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("MultibssEnable", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("HePhyMacNc", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("SrCtrlHesigaSpatialReuseVal15", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("HeOperationCohostedBss", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("HeMuEdcaIePresent", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("HePhyDcmMaxConstellationTx", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("HePhyDcmMaxConstellationRx", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("HePhyDcmMaxNssTx", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("HePhyDcmMaxNssRx", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("Ieee80211nAcAxCompat", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("EnableHeDebugMode", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("HeMuEdcaAcBeAifsn", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("HeMuEdcaAcBkAifsn", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("HeMuEdcaAcViAifsn", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("HeMuEdcaAcVoAifsn", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("EnableEhtDebugMode", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("EhtMacEhtOmControl", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("EhtMacRestrictedTwt", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("EhtMacTrigTxopSharingMode1", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("EhtMacTrigTxopSharingMode2", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("EhtPhyTrigMuBfPartialBwFb", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("EhtPhyMaxNc", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("EhtPhySuBeamformer", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("EhtPhySuBeamformee", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("EhtPhyPpeThresholdsPresent", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("SetDynamicMuTypeDownLink", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("SetDynamicMuTypeUpLink", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("EhtMacScsTrafficDesc", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("EhtMldTsfDiff", s_setRadioInt32CertVendorParam_pwf),
+
+                  SWLA_DM_PARAM_HDLR("HeMacMaxAMpduLengthExponent", s_setRadioUint32CertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("HeMuEdcaAcBeEcwmin", s_setRadioUint32CertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("HeMuEdcaAcBeEcwmax", s_setRadioUint32CertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("HeMuEdcaAcBeTimer", s_setRadioUint32CertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("HeMuEdcaAcBkAci", s_setRadioUint32CertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("HeMuEdcaAcBkEcwmin", s_setRadioUint32CertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("HeMuEdcaAcBkEcwmax", s_setRadioUint32CertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("HeMuEdcaAcBkTimer", s_setRadioUint32CertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("HeMuEdcaAcViAci", s_setRadioUint32CertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("HeMuEdcaAcViEcwmin", s_setRadioUint32CertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("HeMuEdcaAcViEcwmax", s_setRadioUint32CertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("HeMuEdcaAcViTimer", s_setRadioUint32CertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("HeMuEdcaAcVoAci", s_setRadioUint32CertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("HeMuEdcaAcVoEcwmin", s_setRadioUint32CertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("HeMuEdcaAcVoEcwmax", s_setRadioUint32CertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("HeMuEdcaAcVoTimer", s_setRadioUint32CertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("EhtMcsMapLessOrEq80MHzRx09", s_setRadioUint32CertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("EhtMcsMapLessOrEq80MHzTx09", s_setRadioUint32CertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("EhtMcsMapLessOrEq80MHzRx1011", s_setRadioUint32CertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("EhtMcsMapLessOrEq80MHzTx1011", s_setRadioUint32CertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("EhtMcsMapLessOrEq80MHzRx1213", s_setRadioUint32CertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("EhtMcsMapLessOrEq80MHzTx1213", s_setRadioUint32CertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("EhtPhyMaxAmpduLenExpExt", s_setRadioUint32CertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("EhtMacMaxMpduLen", s_setRadioUint32CertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("EhtPhyCommonNominalPktPad", s_setRadioUint32CertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("EhtMcsMap160MHzRxMcs09", s_setRadioUint32CertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("EhtMcsMap160MHzTxMcs09", s_setRadioUint32CertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("EhtMcsMap160MHzTxMcs1011", s_setRadioUint32CertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("EhtMcsMap160MHzRxMcs1011", s_setRadioUint32CertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("EhtMcsMap160MHzTxMcs1213", s_setRadioUint32CertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("EhtMcsMap160MHzRxMcs1213", s_setRadioUint32CertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("EhtMcsMap320MHzRxMcs09", s_setRadioUint32CertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("EhtMcsMap320MHzTxMcs09", s_setRadioUint32CertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("EhtMcsMap320MHzRxMcs1011", s_setRadioUint32CertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("EhtMcsMap320MHzTxMcs1011", s_setRadioUint32CertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("EhtMcsMap320MHzRxMcs1213", s_setRadioUint32CertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("EhtMcsMap320MHzTxMcs1213", s_setRadioUint32CertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("EhtPhy320MHzIn6GHz", s_setRadioUint32CertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("AdvertiseEcsaIe", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("SetMaxMpduLen", s_setRadioInt32CertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("HeOpTxopDurationRtsThreshold", s_setRadioUint32CertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("HePhySuBeamformeeCapable", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("HePhySuBeamformerCapable", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("HePhyBeamformeeStsLesOrEq80Mhz", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("HePhyBeamformeeStsGreater80Mhz", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("HePhyDeviceClass", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("HePhySuPpdu1xHeLtfAnd08UsGi", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("HePhySuPpduHeMu4xHeLtf08UsGi", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("HePhyMuBeamformerCapable", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("HePhyNdpWith4xHeLtfAnd32UsGi", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("HePhyNg16SuFeedback", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("HePhyNg16MuFeedback", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("HePhyNumSoundDimenLeOrEq80Mhz", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("HePhyNumSoundDimenGreater80Mhz", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("HePhyTriggerSuBeamformFeedback", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("HePhyDopplerRx", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("HePhyDopplerTx", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("HePhyFullBandwidthUlMuMimo", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("HePhyPartialBandwidthUlMuMimo", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("HePhyPartialBWExtendedRange", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("HePhyTriggeredCqiFeedback", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("HePhyPpeThresholdsPresent", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("HePhyCodebookSize42SuSupport", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("HePhyCodebookSize75MuSupport", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("HePhyPowBoostFactAlphaSupport", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("HeMacOmCtrlMuDisableRxSupport", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("HeOpTxopDurationRtsThreshold", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("HeMacUl2x996ToneRuSupport", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("HeMacAckEnabledAggrSupport", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("HeMacBroadcastTwtSupport", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("HePhyDcmMaxBw", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("HePhyLong16HeSigOfdmSymSupport", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("HeMacNdpFeedbackReportSupport", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("HePhyRx1024QLt242ToneRuSupport", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("HePhyRxFullBwSuUsingMuCompSigb", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("HePhyRxFulBwUsingMuNonComSigb", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("HePhyStbcTxLessThanOrEq80Mhz", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("HePhyStbcTxGreaterThan80Mhz", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("HeOperationErSuDisable", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("HePhyErSuPpdu4xLtf8UsGi", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("HePhyPreamblePuncturingRx", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("HeMacMultiTidAggrTxSupport", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("HeMacMultiTidAggrRxSupport", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("EhtPhyNumSoundDim80MhzOrBelow", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("EhtPhyNumSoundingDim160Mhz", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("EhtPhyNumSoundingDim320Mhz", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("EhtPhyMuBeamformerBw80MhzBelow", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("EhtPhyMuBeamformerBw160Mhz", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("EhtPhyMuBeamformerBw320Mhz", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("EhtPhyNdp4xEhtLtfAnd32UsGi", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("EhtPhyPartialBwUlMuMimo", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("EhtPhyBeamformeeSs80MhzOrBelow", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("EhtPhyBeamformeeSs160Mhz", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("EhtPhyBeamformeeSs320Mhz", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("EhtPhyEhtDupIn6Ghz", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("EhtPhy20MhzOpStaRxNdpWiderBw", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("EhtPhyNg16SuFeedback", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("EhtPhyNg16MuFeedback", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("EhtPhyCodebookSize42SuFb", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("EhtPhyCodebookSize755MuFb", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("EhtPhyTrigSuBfFb", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("EhtPhyTrigCqiFb", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("EhtPhyPartialBwDlMuMimo", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("EhtPhyPsrBasedSr", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("EhtPhyEhtMuPpdu4xEhtLtf08UsGi", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("EhtPhyRx1024Qam4096QamBel242Ru", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("EhtPhyMaxNumOfSupportedEhtLtfs", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("EhtPhyMcs15", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("EhtPhyNonOfdmaMuMimo80MhzBelow", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("EhtPhyNonOfdmaUlMuMimoBw160Mhz", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("EhtPhyNonOfdmaUlMuMimoBw320Mhz", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("Rnr6gOpClass137Allowed", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("SetDynamicMuMinStationsInGroup", s_setRadioUint32CertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("SetDynamicMuMaxStationsInGroup", s_setRadioUint32CertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("SetDynamicMuCdbConfig", s_setRadioUint32CertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("RnrTbttMldNonZeroPad", s_setRadioUint32CertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("Country3", s_setCountryThird_pwf))
               );
 void _whm_mxl_rad_setVendorObj_ocf(const char* const sig_name,
                             const amxc_var_t* const data,
@@ -1003,6 +1310,19 @@ void _whm_mxl_rad_setVendorObj_ocf(const char* const sig_name,
 }
 
 #ifdef CONFIG_VENDOR_MXL_PROPRIETARY
+amxd_status_t _whm_mxl_rad_validateBgAcsInterval_pvf(amxd_object_t* _UNUSED,
+                                                     amxd_param_t* param _UNUSED,
+                                                     amxd_action_t reason _UNUSED,
+                                                     const amxc_var_t* const args,
+                                                     amxc_var_t* const retval _UNUSED,
+                                                     void* priv _UNUSED) {
+    uint16_t newVal = amxc_var_dyncast(uint16_t, args);
+    if ((newVal >= MXL_BG_ACS_INTERVAL_MIN && newVal <= MXL_BG_ACS_INTERVAL_MAX) || (newVal == 0)) {
+        return amxd_status_ok;
+    }
+    return amxd_status_invalid_value;
+}
+
 static void s_setAcsConfig_ocf(void* priv _UNUSED, amxd_object_t* object, const amxc_var_t* const newParamValues _UNUSED) {
     SAH_TRACEZ_IN(ME);
     /* WiFi.Radio.{}.Vendor.Acs. */
@@ -1027,12 +1347,20 @@ static void s_setAcsConfig_ocf(void* priv _UNUSED, amxd_object_t* object, const 
         } else if(swl_str_matches(pname, "AcsFils")) {
             newVal = amxc_var_dyncast(bool, newValue);
             whm_mxl_determineRadParamAction(pRad, pname, (newVal ? "1" : "0"));
+        } else if(swl_str_matches(pname, "Acs6gPunctMode") && wld_rad_is_6ghz(pRad)) {
+            newVal = amxc_var_dyncast(bool, newValue);
+            whm_mxl_determineRadParamAction(pRad, pname, (newVal ? "1" : "0"));
         } else if(swl_str_matches(pname, "Acs6gOptChList")) {
             newValStr = amxc_var_dyncast(cstring_t, newValue);
             whm_mxl_determineRadParamAction(pRad, pname, newValStr);
         } else if(swl_str_matches(pname, "AcsStrictChList")) {
             newValStr = amxc_var_dyncast(cstring_t, newValue);
             whm_mxl_determineRadParamAction(pRad, pname, newValStr);
+        } else if(swl_str_matches(pname, "AcsBgScanInterval")) {
+            if (pRadVendor) {
+                pRadVendor->bgAcsInterval = amxc_var_dyncast(uint16_t, newValue);
+                whm_mxl_configureBgAcs(pRad, pRadVendor->bgAcsInterval);
+            }
         } else if(swl_str_matches(pname, "AcsFallbackPrimaryChan")) {
             ASSERT_NOT_NULL(pRadVendor, , ME, "pRadVendor is NULL");
             pRadVendor->AcsFbPrimChan = amxc_var_dyncast(int32_t, newValue);
@@ -1283,12 +1611,19 @@ void _whm_mxl_rad_setDelayedStartConf_ocf(const char* const sig_name,
     swla_dm_procObjEvtOfLocalDm(&sDelayedStartDmHdlrs, sig_name, data, priv);
 }
 
+#ifdef CONFIG_VENDOR_MXL_PROPRIETARY
 int whm_mxl_rad_autoChannelEnable(T_Radio* pRad, int enable, int set) {
     SAH_TRACEZ_IN(ME);
     int ret = SWL_RC_OK;
+    mxl_VendorData_t* pRadVendor = mxl_rad_getVendorData(pRad);
 
     if(set & SET) {
         pRad->autoChannelSetByUser = pRad->autoChannelEnable = enable;
+
+        if (pRadVendor) {
+            whm_mxl_configureBgAcs(pRad, (enable ? pRadVendor->bgAcsInterval : 0));
+        }
+
         if (wld_secDmn_isAlive(pRad->hostapd)) {
             T_AccessPoint* primaryVap = wld_rad_firstAp(pRad);
             ASSERT_NOT_NULL(primaryVap, SWL_RC_INVALID_PARAM, ME, "primaryVap is NULL");
@@ -1310,6 +1645,7 @@ int whm_mxl_rad_autoChannelEnable(T_Radio* pRad, int enable, int set) {
     SAH_TRACEZ_OUT(ME);
     return ret;
 }
+#endif /* CONFIG_VENDOR_MXL_PROPRIETARY */
 
 swl_rc_ne whm_mxl_rad_setChanspec(T_Radio* pRad, bool direct)
 {
@@ -1493,4 +1829,124 @@ swl_rc_ne whm_mxl_rad_supstd(T_Radio* pRad, swl_radioStandard_m radioStandards) 
         }
     }
     return rc;
+}
+
+bool whm_mxl_rad_setCtrlSockSyncNeeded(T_Radio* pRad, bool flag) {
+    ASSERT_NOT_NULL(pRad, false, ME, "NULL");
+    mxl_VendorData_t* pRadVendor = mxl_rad_getVendorData(pRad);
+    ASSERT_NOT_NULL(pRadVendor, false, ME, "pRadVendor is NULL");
+    pRadVendor->checkWpaCtrlOnSync = flag;
+    return true;
+}
+
+bool whm_mxl_rad_isCtrlSockSyncNeeded(T_Radio* pRad) {
+    ASSERT_NOT_NULL(pRad, false, ME, "NULL");
+    mxl_VendorData_t* pRadVendor = mxl_rad_getVendorData(pRad);
+    ASSERT_NOT_NULL(pRadVendor, false, ME, "pRadVendor is NULL");
+    return pRadVendor->checkWpaCtrlOnSync;
+}
+
+/**
+ * @brief Request to reconf all changed BSS from reconf FSM
+ *
+ * @param T_Radio radio
+ * @return none.
+ */
+void whm_mxl_rad_requestReconf(T_Radio* pRad) {
+    ASSERT_NOT_NULL(pRad, , ME, "NULL");
+    mxl_VendorData_t* pRadVendor = mxl_rad_getVendorData(pRad);
+    ASSERTI_NOT_NULL(pRadVendor, , ME, "pRadVendor is NULL");
+    setBitLongArray(pRadVendor->reconfFsm.FSM_BitActionArray, FSM_BW, RECONF_FSM_DO_RECONF);
+    whm_mxl_reconfMngr_notifyCommit(pRad);
+}
+
+/**
+ * @brief Request sync action from reconf FSM
+ *
+ * @param T_Radio radio
+ * @return none.
+ */
+void whm_mxl_rad_requestSync(T_Radio* pRad) {
+    ASSERT_NOT_NULL(pRad, , ME, "NULL");
+    mxl_VendorData_t* pRadVendor = mxl_rad_getVendorData(pRad);
+    ASSERTI_NOT_NULL(pRadVendor, , ME, "pRadVendor is NULL");
+    setBitLongArray(pRadVendor->reconfFsm.FSM_BitActionArray, FSM_BW, RECONF_FSM_SYNC);
+    whm_mxl_reconfMngr_notifyCommit(pRad);
+}
+
+/**
+ * @brief Fetch Tx Power data from MxL Vendor NL
+ *
+ * @param T_Radio* Radio pointer
+ * @param mxl_txPower_type_e Type of transmit power to return
+ * @return int32_t txPower in dBm
+ */
+int32_t mxl_rad_getTxPower(T_Radio* pRad, mxl_txPower_type_e txPowerType) {
+    ASSERT_TRUE(wld_rad_hasActiveIface(pRad), SWL_RC_ERROR, ME, "%s not ready", pRad->Name);
+    uint32_t ifIndex = wld_rad_getFirstEnabledIfaceIndex(pRad);
+    ASSERT_TRUE(ifIndex > 0, SWL_RC_ERROR, ME, "%s: rad has no enabled iface", pRad->Name);
+
+    swl_rc_ne rc = SWL_RC_ERROR;
+    struct mxl_vendor_tx_power txPowerData;
+    int32_t txPower = -1;
+    struct cbData_t getData;
+
+    getData.size = sizeof(struct mxl_vendor_tx_power);
+    getData.data = &txPowerData;
+    rc = wld_rad_nl80211_sendVendorSubCmd(pRad, OUI_MXL, LTQ_NL80211_VENDOR_SUBCMD_GET_20MHZ_TX_POWER, NULL, 0,
+                                          VENDOR_SUBCMD_IS_SYNC, VENDOR_SUBCMD_IS_WITHOUT_ACK, 0, s_getDataCb, &getData);
+    ASSERTI_FALSE(rc < SWL_RC_OK, SWL_RC_ERROR, ME, "Failed to call LTQ_NL80211_VENDOR_SUBCMD_GET_20MHZ_TX_POWER");
+
+    switch (txPowerType) {
+        case TX_POWER_RNR:
+            txPower = txPowerData.rnr_20mhz_tx_power;
+            break;
+        case TX_POWER_CURRENT:
+            txPower = txPowerData.cur_tx_power;
+            break;
+        case TX_POWER_MAX:
+            txPower = txPowerData.max_tx_power;
+            break;
+        default:
+            SAH_TRACEZ_ERROR(ME, "%s: Invalid Tx Power Type", pRad->Name);
+            txPower = -1;
+    }
+
+    return txPower;
+}
+
+/**
+ * @brief FTA Handler to fetch current transmit power in dBm
+ *
+ * @param T_Radio* Pointer to the radio
+ * @param int32_t* Pointer to store the current transmit power in dBm
+ * @return swl_rc_ne SWL_RC_OK on success, SWL_RC_ERROR code otherwise
+ */
+swl_rc_ne whm_mxl_rad_getTxPowerdBm(T_Radio* pRad, int32_t* dbm) {
+    ASSERT_NOT_NULL(pRad, SWL_RC_INVALID_PARAM, ME, "NULL");
+
+    *dbm = mxl_rad_getTxPower(pRad, TX_POWER_CURRENT);
+    ASSERT_FALSE(*dbm < 0, SWL_RC_ERROR, ME, "%s: Failed to get Tx Power", pRad->Name);
+    SAH_TRACEZ_INFO(ME, "%s: Received Current Tx Power of %d", pRad->Name, *dbm);
+
+    return SWL_RC_OK;
+}
+
+/**
+ * @brief FTA Handler to fetch maximum transmit power in dBm
+ *
+ * @param T_Radio* rad pointer to the radio
+ * @param uint16_t channel channel number (Unused)
+ * @param int32_t* dbm pointer to store the current transmit power in dBm
+ * @return swl_rc_ne SWL_RC_OK on success, error code otherwise
+ */
+swl_rc_ne whm_mxl_rad_getMaxTxPowerdBm(T_Radio* pRad, uint16_t channel, int32_t* dbm) {
+    ASSERT_NOT_NULL(pRad, SWL_RC_INVALID_PARAM, ME, "NULL");
+
+    *dbm = mxl_rad_getTxPower(pRad, TX_POWER_MAX);
+    ASSERT_FALSE(*dbm < 0, SWL_RC_ERROR, ME, "%s: Failed to get Tx Power", pRad->Name);
+    SAH_TRACEZ_INFO(ME, "%s: input channel %d is not required", pRad->Name, channel);
+    SAH_TRACEZ_INFO(ME, "%s: Received Max Tx Power of %d", pRad->Name, *dbm);
+
+    return SWL_RC_OK;
 }

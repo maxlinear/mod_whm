@@ -22,9 +22,6 @@
                     parameter SAEPassphrase = "password";
                 }
 {% endif %}
-                object Security {
-                    parameter RekeyingInterval = 86400;
-                }
             }
 {% endif; endfor; %}
         }

@@ -66,6 +66,8 @@ swl_rc_ne mxl_parseNaStaEvt(T_Radio* pRad, struct nlattr* tb[]) {
     }
     SAH_TRACEZ_INFO(ME, "%s: %s bestRssi %d, savedRssi %d, rate %dMbps", pRad->Name, nastaMacStr.cMac, bestRssi, pMD->SignalStrength, curRate);
 
+    whm_mxl_monitor_updateNaStaObj(pRad);
+
     mxl_nastaEntryData_t* pEntry = mxl_monitor_fetchRunNaStaEntry(pRad, (swl_macBin_t*) nasta->addr);
     if(pEntry) {
         SAH_TRACEZ_INFO(ME, "del executed runNaSta entry %s", nastaMacStr.cMac);

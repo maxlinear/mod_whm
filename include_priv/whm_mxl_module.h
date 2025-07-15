@@ -31,6 +31,7 @@ typedef enum {
 typedef struct {
     whm_mxl_module_mode_e mode;
     /* Add other configs here if needed */
+    bool wpa3CertMode;
 } whm_mxl_module_mode_t;
 
 bool whm_mxl_module_init();
@@ -39,5 +40,6 @@ bool whm_mxl_module_loadDefaults();
 swl_rc_ne whm_mxl_module_addRadios();
 whm_mxl_module_mode_e whm_mxl_getModuleMode();
 bool whm_mxl_isCertModeEnabled();
+bool whm_mxl_isWpa3CertModeEnabled();
 
 #endif // __WHM_MXL_MODULE_H__

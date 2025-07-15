@@ -12,11 +12,24 @@
 #include "wld/wld.h"
 #include "whm_mxl_monitor.h"
 #include "whm_mxl_zwdfs.h"
+#include "whm_mxl_reconfFsm.h"
 
 /* General Definitions Section */
 #define CCA_TH_SIZE 5
-
+#ifdef CONFIG_VENDOR_MXL_PROPRIETARY
+/* BG ACS Interval range in minutes */
+#define MXL_BG_ACS_INTERVAL_MIN 15
+#define MXL_BG_ACS_INTERVAL_MAX 1440
+#endif /* CONFIG_VENDOR_MXL_PROPRIETARY */
 /* Macros Section */
+
+typedef enum {
+	TX_POWER_NONE = -1,
+	TX_POWER_RNR = 0,
+	TX_POWER_CURRENT,
+	TX_POWER_MAX,
+	TX_POWER_LAST,
+} mxl_txPower_type_e;
 
 /* Struct Definition Section */
 typedef struct {
@@ -27,6 +40,21 @@ typedef struct {
 
     /* vendor object */
     amxd_object_t* pBus;
+
+    /* MxL reconf FSM manager context */
+    wld_fsmMngr_t* reconfFsmMngr;
+
+    /* MxL reconf FSM - Used by Reconf FSM */
+    T_FSM reconfFsm;
+
+    /* Reconf FSM state indication */
+    whm_mxl_reconfFsm_brief_state_e reconfFsmBriefState;
+
+    /* Mxl reconf commit timer */
+    amxp_timer_t* commitTimer;
+
+    /* Indicate if need to sync wpa ctrl when running Reconf FSM */
+    bool checkWpaCtrlOnSync;
 
     /* BSS Color */
     int randomColor;
@@ -47,10 +75,15 @@ typedef struct {
     /* delVapTimer retries */
     int delVapTimerRetries;
 
+#ifdef CONFIG_VENDOR_MXL_PROPRIETARY
+    /* BG ACS Interval - saved in minutes */
+    uint16_t bgAcsInterval;
+
     /* ACS FallBack params */
     int AcsFbPrimChan;
     int AcsFbSecChan;
     int AcsFbBw;
+#endif /* CONFIG_VENDOR_MXL_PROPRIETARY */
 } mxl_VendorData_t;
 
 typedef struct {
@@ -85,6 +118,7 @@ int whm_mxl_rad_addEndpointIf(T_Radio* pRad, char* buf, int bufsize);
 void whm_mxl_rad_delVap_timer_init(T_Radio* pRad);
 void whm_mxl_rad_delVap_timer_deinit(T_Radio* pRad);
 void whm_mxl_rad_delVap_timer_enable(T_Radio* pRad, bool enable);
+void whm_mxl_dynamicAddVapSync(T_Radio* pRad, T_AccessPoint* pAP);
 
 int whm_mxl_rad_stats(T_Radio* pRad);
 int whm_mxl_rad_antennaCtrl(T_Radio* pRad, int val, int set);
@@ -92,7 +126,9 @@ int whm_mxl_rad_beamforming(T_Radio* rad, beamforming_type_t type, int val, int 
 swl_rc_ne whm_mxl_rad_startScan(T_Radio* pRadio);
 swl_rc_ne whm_mxl_rad_supvendModesChanged(T_Radio* pRad, T_AccessPoint* pAP, amxd_object_t* object, amxc_var_t* params);
 swl_rc_ne whm_mxl_rad_regDomain(T_Radio* pRad, char* val, int bufsize, int set);
+#ifdef CONFIG_VENDOR_MXL_PROPRIETARY
 int whm_mxl_rad_autoChannelEnable(T_Radio* pRad, int enable, int set);
+#endif /* CONFIG_VENDOR_MXL_PROPRIETARY */
 swl_rc_ne whm_mxl_rad_setChanspec(T_Radio* pRad, bool direct);
 int8_t *whm_mxl_rad_txPercentToPower(uint8_t percent);
 uint8_t *whm_mxl_rad_txPowerToPercent(int8_t power);
@@ -100,5 +136,12 @@ int whm_mxl_rad_status(T_Radio* pRad);
 swl_rc_ne whm_mxl_rad_supstd(T_Radio* pRad, swl_radioStandard_m radioStandards);
 swl_rc_ne whm_mxl_getBgScanParams(T_Radio* pRad, mxl_bgScanParams_t *pBgScanParams);
 swl_rc_ne whm_mxl_setBgScanParams(T_Radio* pRad, mxl_bgScanParams_t *pBgScanParams);
+swl_rc_ne whm_mxl_hapd_getRadState(T_Radio* pRad, chanmgt_rad_state* pDetailedState);
+bool whm_mxl_rad_setCtrlSockSyncNeeded(T_Radio* pRad, bool flag);
+bool whm_mxl_rad_isCtrlSockSyncNeeded(T_Radio* pRad);
+void whm_mxl_rad_requestReconf(T_Radio* pRad);
+void whm_mxl_rad_requestSync(T_Radio* pRad);
+swl_rc_ne whm_mxl_rad_getTxPowerdBm(T_Radio* rad, int32_t* dbm);
+swl_rc_ne whm_mxl_rad_getMaxTxPowerdBm(T_Radio* pRad, uint16_t channel, int32_t* dbm);
 
 #endif /* __WHM_MXL_RAD_H__ */

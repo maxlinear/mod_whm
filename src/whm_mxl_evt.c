@@ -288,41 +288,11 @@ static void s_mxl_apBwChanged(void* userData, char* ifName _UNUSED, char* event 
     }
 }
 
-static void s_mxl_ConnectedEvt(void* userData _UNUSED, char* ifName, char* event _UNUSED, char* params) {
-	T_EndPoint* pEP = wld_vep_from_name(ifName);
-	ASSERT_NOT_NULL(pEP, , ME, "Could not get EndPoint from ifname(%s)", ifName);
-
-	uint8_t multi_ap_profile = 0;
-	uint16_t multi_ap_primary_vlanid = 0;
-
-	multi_ap_profile = wld_wpaCtrl_getValueInt(params, "multi_ap_profile");
-	multi_ap_primary_vlanid = wld_wpaCtrl_getValueInt(params, "multi_ap_primary_vlanid");
-
-	amxd_object_t* object = pEP->pBus;
-	if(!object) {
-           SAH_TRACEZ_ERROR(ME, "Endpoint datamodel object pointer is missing");
-           return;
-	}
-	amxd_trans_t trans;
-	ASSERT_TRANSACTION_INIT(object, &trans, , ME, "%s: trans init failure", pEP->Name);
-	if (multi_ap_profile != pEP->multiAPProfile) {
-	    pEP->multiAPProfile = multi_ap_profile;
-		 amxd_trans_set_uint8_t(&trans, "MultiAPProfile", pEP->multiAPProfile);
-	}
-	if (multi_ap_primary_vlanid != pEP->multiAPVlanId) {
-	    pEP->multiAPVlanId = multi_ap_primary_vlanid;
-		 amxd_trans_set_uint16_t(&trans, "MultiAPVlanId", pEP->multiAPVlanId);
-	}
-
-	ASSERT_TRANSACTION_LOCAL_DM_END(&trans, , ME, "%s : trans apply failure", pEP->Name);
-}
-
 SWL_TABLE(mxl_CustomWpaCtrlEvents,
           ARR(char* evtName; void* evtParser; ),
           ARR(swl_type_charPtr, swl_type_voidPtr),
           ARR(
               {"AP-BW-CHANGED", &s_mxl_apBwChanged},
-	      {"CTRL-EVENT-CONNECTED", &s_mxl_ConnectedEvt},
               ));
 
 static evtParser_f s_mxl_getCustomEventParser(char* eventName) {
@@ -388,36 +358,5 @@ swl_rc_ne mxl_evt_setVendorEvtHandlers(T_Radio* pRad) {
     }
 
     s_mxl_setRadioWpaCtrlEvtHandlers(pRad);
-    return SWL_RC_OK;
-}
-
-static swl_rc_ne s_mxl_setEpWpaCtrlEvtHandlers(T_EndPoint* pEP) {
-    void* userdata = NULL;
-    wld_wpaCtrl_radioEvtHandlers_cb handlers = {0};
-
-    ASSERT_NOT_NULL(pEP->wpaSupp, SWL_RC_INVALID_PARAM, ME, "wpaSupp is NULL");
-    ASSERT_NOT_NULL(pEP->wpaSupp->wpaCtrlMngr, SWL_RC_INVALID_PARAM, ME, "wpaCtrlMngr is NULL");
-
-    if (!wld_wpaCtrlMngr_getEvtHandlers(pEP->wpaSupp->wpaCtrlMngr, &userdata, &handlers)) {
-        SAH_TRACEZ_ERROR(ME, "%s: Failed to get event handlers", pEP->Name);
-        return SWL_RC_ERROR;
-    }
-
-    if (userdata == NULL)
-        userdata = pEP;
-
-    handlers.fCustProcEvtMsg = s_mxl_WpaCustomCtrlEvtMsg;
-    if (!wld_wpaCtrlMngr_setEvtHandlers(pEP->wpaSupp->wpaCtrlMngr, userdata, &handlers)) {
-        SAH_TRACEZ_ERROR(ME, "%s: Failed to set event handlers", pEP->Name);
-        return SWL_RC_ERROR;
-    }
-
-    return SWL_RC_OK;
-}
-
-swl_rc_ne mxl_evt_setVendorEvtHandlers_Ep(T_EndPoint* pEP) {
-    ASSERT_NOT_NULL(pEP, SWL_RC_INVALID_PARAM, ME, "pRad NULL");
-
-    s_mxl_setEpWpaCtrlEvtHandlers(pEP);
     return SWL_RC_OK;
 }

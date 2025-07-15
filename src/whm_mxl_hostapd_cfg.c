@@ -26,6 +26,7 @@
 #include "wld/wld_chanmgt.h"
 #include "wld/wld_accesspoint.h"
 
+#include "whm_mxl_module.h"
 #include "whm_mxl_rad.h"
 #include "whm_mxl_vap.h"
 #include "whm_mxl_hostapd_cfg.h"
@@ -42,20 +43,29 @@
 static swl_rc_ne whm_mxl_rad_acsUpdateConfigMap(T_Radio* pRad, mxl_VendorData_t* pRadVendor, swl_mapChar_t* configMap) {
     amxd_object_t* acsObj = amxd_object_get(pRadVendor->pBus, "ACS");
     ASSERT_NOT_NULL(acsObj, SWL_RC_ERROR, ME, "No ACS vendor obj");
+    char *acsFallbackChan = amxd_object_get_value(cstring_t, acsObj, "AcsFallbackChan", NULL);
+    char *acs6gOptChList = amxd_object_get_value(cstring_t, acsObj, "Acs6gOptChList", NULL);
 
     swl_mapCharFmt_addValStr(configMap, "acs_smart_info_file", "%s%s%s", "/tmp/acs_smart_info_", pRad->Name, ".txt");
     swl_mapCharFmt_addValStr(configMap, "acs_history_file", "%s%s%s", "/tmp/acs_history_", pRad->Name, ".txt");
     swl_mapCharFmt_addValInt32(configMap, "acs_num_scans", 1);
     swl_mapCharFmt_addValInt32(configMap, "acs_scan_mode", amxd_object_get_value(bool, acsObj, "AcsScanMode", NULL));
     swl_mapCharFmt_addValInt32(configMap, "acs_update_do_switch", amxd_object_get_value(bool, acsObj, "AcsUpdateDoSwitch", NULL));
-    swl_mapCharFmt_addValStr(configMap, "acs_fallback_chan", amxd_object_get_value(cstring_t, acsObj, "AcsFallbackChan", NULL));
-    if (!swl_str_isEmpty(amxd_object_get_value(cstring_t, acsObj, "Acs6gOptChList", NULL))) {
-        swl_mapCharFmt_addValStr(configMap, "acs_6g_opt_ch_list", amxd_object_get_value(cstring_t, acsObj, "Acs6gOptChList", NULL));
+    if (!swl_str_isEmpty(acsFallbackChan)) {
+        swl_mapCharFmt_addValStr(configMap, "acs_fallback_chan", "%s", acsFallbackChan);
     }
-
+    free(acsFallbackChan);
+    if (!swl_str_isEmpty(acs6gOptChList)) {
+        swl_mapCharFmt_addValStr(configMap, "acs_6g_opt_ch_list", "%s", acs6gOptChList);
+    }
+    free(acs6gOptChList);
 
     if (wld_rad_checkEnabledRadStd(pRad, SWL_RADSTD_AX) && wld_rad_is_6ghz(pRad)) {
         swl_mapCharFmt_addValInt32(configMap, "acs_fils", amxd_object_get_value(bool, acsObj, "AcsFils", NULL));
+    }
+
+    if (wld_rad_is_6ghz(pRad)) {
+        swl_mapCharFmt_addValInt32(configMap, "acs_6g_punct_mode", amxd_object_get_value(bool, acsObj, "Acs6gPunctMode", NULL));
     }
 
     return SWL_RC_OK;
@@ -66,32 +76,18 @@ static swl_rc_ne whm_mxl_rad_afcUpdateConfigMap(amxd_object_t* pVendorObj, swl_m
     ASSERT_NOT_NULL(pVendorObj, SWL_RC_ERROR, ME, "pVendorObj is NULL");
     amxd_object_t* afcObj = amxd_object_get(pVendorObj, "AFC");
     ASSERT_NOT_NULL(afcObj, SWL_RC_ERROR, ME, "afcObj is NULL");
+    char *tmpStr = NULL;
 
-    if (!swl_str_isEmpty(amxd_object_get_value(cstring_t, afcObj, "AfcdSock", NULL))) {
-        swl_mapCharFmt_addValStr(configMap, "afcd_sock", amxd_object_get_value(cstring_t, afcObj, "AfcdSock", NULL));
-    }
-    if (!swl_str_isEmpty(amxd_object_get_value(cstring_t, afcObj, "AfcOpClass", NULL))) {
-        swl_mapCharFmt_addValStr(configMap, "afc_op_class", amxd_object_get_value(cstring_t, afcObj, "AfcOpClass", NULL));
-    }
-    if (!swl_str_isEmpty(amxd_object_get_value(cstring_t, afcObj, "AfcFrequencyRange", NULL))) {
-        swl_mapCharFmt_addValStr(configMap, "afc_freq_range", amxd_object_get_value(cstring_t, afcObj, "AfcFrequencyRange", NULL));
-    }
-    if (!swl_str_isEmpty(amxd_object_get_value(cstring_t, afcObj, "AfcCertIds", NULL))) {
-        swl_mapCharFmt_addValStr(configMap, "afc_cert_ids", amxd_object_get_value(cstring_t, afcObj, "AfcCertIds", NULL));
-    }
-    if (!swl_str_isEmpty(amxd_object_get_value(cstring_t, afcObj, "AfcSerialNumber", NULL))) {
-        swl_mapCharFmt_addValStr(configMap, "afc_serial_number", amxd_object_get_value(cstring_t, afcObj, "AfcSerialNumber", NULL));
-    }
-    if (!swl_str_isEmpty(amxd_object_get_value(cstring_t, afcObj, "AfcLinearPolygon", NULL))) {
-        swl_mapCharFmt_addValStr(configMap, "afc_linear_polygon", amxd_object_get_value(cstring_t, afcObj, "AfcLinearPolygon", NULL));
-    }
+    WHM_MXL_GET_AND_SET_STRING_PARAM(tmpStr, afcObj, "AfcdSock", configMap, "afcd_sock");
+    WHM_MXL_GET_AND_SET_STRING_PARAM(tmpStr, afcObj, "AfcOpClass", configMap, "afc_op_class");
+    WHM_MXL_GET_AND_SET_STRING_PARAM(tmpStr, afcObj, "AfcFrequencyRange", configMap, "afc_freq_range");
+    WHM_MXL_GET_AND_SET_STRING_PARAM(tmpStr, afcObj, "AfcCertIds", configMap, "afc_cert_ids");
+    WHM_MXL_GET_AND_SET_STRING_PARAM(tmpStr, afcObj, "AfcSerialNumber", configMap, "afc_serial_number");
+    WHM_MXL_GET_AND_SET_STRING_PARAM(tmpStr, afcObj, "AfcLinearPolygon", configMap, "afc_linear_polygon");
     WHM_MXL_NE_SET_PARAM(amxd_object_get_value(int32_t, afcObj, "AfcLocationType", NULL), -1, configMap, "afc_location_type");
-    if (!swl_str_isEmpty(amxd_object_get_value(cstring_t, afcObj, "AfcRequestId", NULL))) {
-        swl_mapCharFmt_addValStr(configMap, "afc_request_id", amxd_object_get_value(cstring_t, afcObj, "AfcRequestId", NULL));
-    }
-    if (!swl_str_isEmpty(amxd_object_get_value(cstring_t, afcObj, "AfcRequestVersion", NULL))) {
-        swl_mapCharFmt_addValStr(configMap, "afc_request_version", amxd_object_get_value(cstring_t, afcObj, "AfcRequestVersion", NULL));
-    }
+    WHM_MXL_GET_AND_SET_STRING_PARAM(tmpStr, afcObj, "AfcRequestId", configMap, "afc_request_id");
+    WHM_MXL_GET_AND_SET_STRING_PARAM(tmpStr, afcObj, "AfcRequestVersion", configMap, "afc_request_version");
+
     return SWL_RC_OK;
 }
 
@@ -117,12 +113,14 @@ static swl_rc_ne whm_mxl_rad_delayedStartUpdateConfigMap(mxl_VendorData_t* pRadV
     amxd_object_t* DelayedStartObj = amxd_object_get(pRadVendor->pBus, "DelayedStart");
     ASSERT_NOT_NULL(DelayedStartObj, SWL_RC_ERROR, ME, "No DelayedStart vendor obj");
 
+    char *startAfter = amxd_object_get_value(cstring_t, DelayedStartObj, "StartAfter", NULL);
     uint32_t startDelay = amxd_object_get_value(uint32_t, DelayedStartObj, "StartAfterDelay", NULL);
     uint32_t startWdTime = amxd_object_get_value(uint32_t, DelayedStartObj, "StartAfterWatchdogTime", NULL);
 
-    if (!swl_str_matches(amxd_object_get_value(cstring_t, DelayedStartObj, "StartAfter", NULL), "")) {
-        swl_mapCharFmt_addValStr(configMap, "start_after", amxd_object_get_value(cstring_t, DelayedStartObj, "StartAfter", NULL));
+    if (!swl_str_isEmpty(startAfter)) {
+        swl_mapCharFmt_addValStr(configMap, "start_after", "%s",startAfter);
     }
+    free(startAfter);
     WHM_MXL_GT_SET_PARAM(startDelay, 0, configMap, "start_after_delay");
     WHM_MXL_GT_SET_PARAM(startWdTime, 0, configMap, "start_after_watchdog_time");
 
@@ -401,6 +399,195 @@ static void whm_mxl_rad_configAxMxlParams(T_Radio* pRad, swl_mapChar_t* configMa
     swl_mapCharFmt_addValStr(configMap, "he_mu_edca_ac_vo_timer", "%u", 5);
 }
 
+static void  whm_mxl_rad_configCertification(T_Radio* pRad, amxd_object_t* pVendorObj, swl_mapChar_t* configMap) {
+    ASSERT_NOT_NULL(pVendorObj, , ME, "pVendorObj is NULL");
+    bool testbed_mode =  amxd_object_get_value(bool, pVendorObj, "TestBedMode", NULL);
+    char *heMcsNssRxMapLessOrEqual80Mhz = amxd_object_get_value(cstring_t, pVendorObj, "HeMcsNssRxMapLessOrEqual80Mhz", NULL);
+    char *heMcsNssTxMapLessOrEqual80Mhz = amxd_object_get_value(cstring_t, pVendorObj, "HeMcsNssTxMapLessOrEqual80Mhz", NULL);
+    char *heMcsNssRxHeMcsMap160Mhz      = amxd_object_get_value(cstring_t, pVendorObj, "HeMcsNssRxHeMcsMap160Mhz", NULL);
+    char *heMcsNssTxHeMcsMap160Mhz      = amxd_object_get_value(cstring_t, pVendorObj, "HeMcsNssTxHeMcsMap160Mhz", NULL);
+    char *vhtMcsSetPart0                = amxd_object_get_value(cstring_t, pVendorObj, "VhtMcsSetPart0", NULL);
+    char *vhtMcsSetPart1                = amxd_object_get_value(cstring_t, pVendorObj, "VhtMcsSetPart1", NULL);
+    char *country3                      = amxd_object_get_value(cstring_t, pVendorObj, "Country3", NULL);
+
+    swl_mapCharFmt_addValInt32(configMap, "he_phy_ldpc_coding_in_payload", amxd_object_get_value(bool, pVendorObj, "HePhyLdpcCodingInPayload", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "he_mac_a_msdu_in_ack_enabled_a_mpdu_support", amxd_object_get_value(bool, pVendorObj, "HeMacMsduAckEnabledMpduSupport", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "he_mac_maximum_a_mpdu_length_exponent", amxd_object_get_value(uint8_t, pVendorObj, "HeMacMaxAMpduLengthExponent", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "he_mac_om_control_support", amxd_object_get_value(bool, pVendorObj, "HeMacOmControlSupport", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "ht_minimum_mpdu_start_spacing", amxd_object_get_value(bool, pVendorObj, "HtMinMpduStartSpacing", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "multibss_enable", amxd_object_get_value(bool, pVendorObj, "MultibssEnable", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "he_phy_max_nc", amxd_object_get_value(bool, pVendorObj, "HePhyMacNc", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "sr_control_field_hesiga_spatial_reuse_value15_allowed", amxd_object_get_value(bool, pVendorObj, "SrCtrlHesigaSpatialReuseVal15", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "he_operation_cohosted_bss", amxd_object_get_value(bool, pVendorObj, "HeOperationCohostedBss", NULL));
+
+    swl_mapCharFmt_addValStr(configMap, "he_mcs_nss_rx_he_mcs_map_less_than_or_equal_80_mhz", "%s", heMcsNssRxMapLessOrEqual80Mhz);
+    free(heMcsNssRxMapLessOrEqual80Mhz);
+    swl_mapCharFmt_addValStr(configMap, "he_mcs_nss_tx_he_mcs_map_less_than_or_equal_80_mhz", "%s", heMcsNssTxMapLessOrEqual80Mhz);
+    free(heMcsNssTxMapLessOrEqual80Mhz);
+    swl_mapCharFmt_addValStr(configMap, "he_mcs_nss_rx_he_mcs_map_160_mhz", "%s", heMcsNssRxHeMcsMap160Mhz);
+    free(heMcsNssRxHeMcsMap160Mhz);
+    swl_mapCharFmt_addValStr(configMap, "he_mcs_nss_tx_he_mcs_map_160_mhz", "%s", heMcsNssTxHeMcsMap160Mhz);
+    free(heMcsNssTxHeMcsMap160Mhz);
+    swl_mapCharFmt_addValStr(configMap, "vht_mcs_set_part0", "%s", vhtMcsSetPart0);
+    free(vhtMcsSetPart0);
+    swl_mapCharFmt_addValStr(configMap, "vht_mcs_set_part1", "%s", vhtMcsSetPart1);
+    free(vhtMcsSetPart1);
+    if(!swl_str_isEmpty(country3)) {
+        swl_mapCharFmt_addValStr(configMap, "country3", "%s", country3);
+    }
+    free(country3);
+
+    swl_mapCharFmt_addValInt32(configMap, "he_mu_edca_ie_present", amxd_object_get_value(bool, pVendorObj, "HeMuEdcaIePresent", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "he_phy_dcm_max_constellation_tx", amxd_object_get_value(bool, pVendorObj, "HePhyDcmMaxConstellationTx", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "he_phy_dcm_max_constellation_rx", amxd_object_get_value(bool, pVendorObj, "HePhyDcmMaxConstellationRx", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "he_phy_dcm_max_nss_tx", amxd_object_get_value(bool, pVendorObj, "HePhyDcmMaxNssTx", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "he_phy_dcm_max_nss_rx", amxd_object_get_value(bool, pVendorObj, "HePhyDcmMaxNssRx", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "twt_responder_support", amxd_object_get_value(int32_t, pVendorObj, "TwtResponderSupport", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "ieee80211n_acax_compat", amxd_object_get_value(bool, pVendorObj, "Ieee80211nAcAxCompat", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "he_mac_twt_responder_support", amxd_object_get_value(int32_t, pVendorObj, "HeMacTwtResponderSupport", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "enable_he_debug_mode", amxd_object_get_value(bool, pVendorObj, "EnableHeDebugMode", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "he_mu_edca_ac_be_aifsn", amxd_object_get_value(bool, pVendorObj, "HeMuEdcaAcBeAifsn", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "he_mu_edca_ac_be_ecwmin", amxd_object_get_value(int8_t, pVendorObj, "HeMuEdcaAcBeEcwmin", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "he_mu_edca_ac_be_ecwmax", amxd_object_get_value(int8_t, pVendorObj, "HeMuEdcaAcBeEcwmax", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "he_mu_edca_ac_be_timer", amxd_object_get_value(int8_t, pVendorObj, "HeMuEdcaAcBeTimer", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "he_mu_edca_ac_bk_aifsn", amxd_object_get_value(bool, pVendorObj, "HeMuEdcaAcBkAifsn", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "he_mu_edca_ac_bk_aci", amxd_object_get_value(int8_t, pVendorObj, "HeMuEdcaAcBkAci", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "he_mu_edca_ac_bk_ecwmin", amxd_object_get_value(int8_t, pVendorObj, "HeMuEdcaAcBkEcwmin", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "he_mu_edca_ac_bk_ecwmax", amxd_object_get_value(int8_t, pVendorObj, "HeMuEdcaAcBkEcwmax", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "he_mu_edca_ac_bk_timer", amxd_object_get_value(int8_t, pVendorObj, "HeMuEdcaAcBkTimer", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "he_mu_edca_ac_vi_aifsn", amxd_object_get_value(bool, pVendorObj, "HeMuEdcaAcViAifsn", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "he_mu_edca_ac_vi_aci", amxd_object_get_value(int8_t, pVendorObj, "HeMuEdcaAcViAci", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "he_mu_edca_ac_vi_ecwmin", amxd_object_get_value(int8_t, pVendorObj, "HeMuEdcaAcViEcwmin", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "he_mu_edca_ac_vi_ecwmax", amxd_object_get_value(int8_t, pVendorObj, "HeMuEdcaAcViEcwmax", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "he_mu_edca_ac_vi_timer", amxd_object_get_value(int8_t, pVendorObj, "HeMuEdcaAcViTimer", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "he_mu_edca_ac_vo_aifsn", amxd_object_get_value(bool, pVendorObj, "HeMuEdcaAcVoAifsn", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "he_mu_edca_ac_vo_aci", amxd_object_get_value(int8_t, pVendorObj, "HeMuEdcaAcVoAci", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "he_mu_edca_ac_vo_ecwmin", amxd_object_get_value(int8_t, pVendorObj, "HeMuEdcaAcVoEcwmin", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "he_mu_edca_ac_vo_ecwmax", amxd_object_get_value(int8_t, pVendorObj, "HeMuEdcaAcVoEcwmax", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "he_mu_edca_ac_vo_timer", amxd_object_get_value(int8_t, pVendorObj, "HeMuEdcaAcVoTimer", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "enable_eht_debug_mode", amxd_object_get_value(bool, pVendorObj, "EnableEhtDebugMode", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "eht_mac_eht_om_control", amxd_object_get_value(bool, pVendorObj, "EhtMacEhtOmControl", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "eht_mac_restricted_twt", amxd_object_get_value(bool, pVendorObj, "EhtMacRestrictedTwt", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "eht_mac_trig_txop_sharing_mode1", amxd_object_get_value(bool, pVendorObj, "EhtMacTrigTxopSharingMode1", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "eht_mac_trig_txop_sharing_mode2", amxd_object_get_value(bool, pVendorObj, "EhtMacTrigTxopSharingMode2", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "eht_phy_trig_mu_bf_partial_bw_fb", amxd_object_get_value(bool, pVendorObj, "EhtPhyTrigMuBfPartialBwFb", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "eht_phy_max_nc", amxd_object_get_value(bool, pVendorObj, "EhtPhyMaxNc", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "eht_mcs_map_less_than_or_equal_80_mhz_rx_max_nss_eht_mcs_0_9", amxd_object_get_value(uint8_t, pVendorObj, "EhtMcsMapLessOrEq80MHzRx09", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "eht_mcs_map_less_than_or_equal_80_mhz_tx_max_nss_eht_mcs_0_9", amxd_object_get_value(uint8_t, pVendorObj, "EhtMcsMapLessOrEq80MHzTx09", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "eht_mcs_map_less_than_or_equal_80_mhz_rx_max_nss_eht_mcs_10_11", amxd_object_get_value(uint8_t, pVendorObj, "EhtMcsMapLessOrEq80MHzRx1011", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "eht_mcs_map_less_than_or_equal_80_mhz_tx_max_nss_eht_mcs_10_11", amxd_object_get_value(uint8_t, pVendorObj, "EhtMcsMapLessOrEq80MHzTx1011", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "eht_mcs_map_less_than_or_equal_80_mhz_rx_max_nss_eht_mcs_12_13", amxd_object_get_value(uint8_t, pVendorObj, "EhtMcsMapLessOrEq80MHzRx1213", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "eht_mcs_map_less_than_or_equal_80_mhz_tx_max_nss_eht_mcs_12_13", amxd_object_get_value(uint8_t, pVendorObj, "EhtMcsMapLessOrEq80MHzTx1213", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "eht_mac_max_ampdu_len_exp_ext", amxd_object_get_value(uint8_t, pVendorObj, "EhtPhyMaxAmpduLenExpExt", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "eht_phy_su_beamformer", amxd_object_get_value(bool, pVendorObj, "EhtPhySuBeamformer", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "eht_phy_su_beamformee", amxd_object_get_value(bool, pVendorObj, "EhtPhySuBeamformee", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "eht_mac_max_mpdu_len", amxd_object_get_value(uint32_t, pVendorObj, "EhtMacMaxMpduLen", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "eht_phy_ppe_thresholds_present", amxd_object_get_value(bool, pVendorObj, "EhtPhyPpeThresholdsPresent", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "sDynamicMuTypeDownLink", amxd_object_get_value(bool, pVendorObj, "SetDynamicMuTypeDownLink", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "sDynamicMuTypeUpLink", amxd_object_get_value(bool, pVendorObj, "SetDynamicMuTypeUpLink", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "eht_mac_scs_traffic_desc", amxd_object_get_value(bool, pVendorObj, "EhtMacScsTrafficDesc", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "eht_phy_common_nominal_pkt_pad", amxd_object_get_value(uint8_t, pVendorObj, "EhtPhyCommonNominalPktPad", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "sMaxMpduLen", amxd_object_get_value(int32_t, pVendorObj, "SetMaxMpduLen", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "advertise_ecsa_ie", amxd_object_get_value(bool, pVendorObj, "AdvertiseEcsaIe", NULL));
+    if (wld_rad_is_24ghz(pRad)) {
+	    swl_mapCharFmt_addValInt32(configMap, "eht_mld_tsf_diff", amxd_object_get_value(int32_t, pVendorObj, "EhtMldTsfDiff", NULL));
+    } else {
+	    swl_mapCharFmt_addValInt32(configMap, "eht_mcs_map_160_mhz_rx_max_nss_eht_mcs_0_9", amxd_object_get_value(uint8_t, pVendorObj, "EhtMcsMap160MHzRxMcs09", NULL));
+        swl_mapCharFmt_addValInt32(configMap, "eht_mcs_map_160_mhz_tx_max_nss_eht_mcs_0_9", amxd_object_get_value(uint8_t, pVendorObj, "EhtMcsMap160MHzTxMcs09", NULL));
+        swl_mapCharFmt_addValInt32(configMap, "eht_mcs_map_160_mhz_tx_max_nss_eht_mcs_10_11", amxd_object_get_value(uint8_t, pVendorObj, "EhtMcsMap160MHzTxMcs1011", NULL));
+        swl_mapCharFmt_addValInt32(configMap, "eht_mcs_map_160_mhz_rx_max_nss_eht_mcs_10_11", amxd_object_get_value(uint8_t, pVendorObj, "EhtMcsMap160MHzRxMcs1011", NULL));
+        swl_mapCharFmt_addValInt32(configMap, "eht_mcs_map_160_mhz_tx_max_nss_eht_mcs_12_13", amxd_object_get_value(uint8_t, pVendorObj, "EhtMcsMap160MHzTxMcs1213", NULL));
+        swl_mapCharFmt_addValInt32(configMap, "eht_mcs_map_160_mhz_rx_max_nss_eht_mcs_12_13", amxd_object_get_value(uint8_t, pVendorObj, "EhtMcsMap160MHzRxMcs1213", NULL));
+    }
+    if (wld_rad_is_6ghz(pRad)) {
+        swl_mapCharFmt_addValInt32(configMap, "eht_mcs_map_320_mhz_rx_max_nss_eht_mcs_0_9", amxd_object_get_value(uint8_t, pVendorObj, "EhtMcsMap320MHzRxMcs09", NULL));
+        swl_mapCharFmt_addValInt32(configMap, "eht_mcs_map_320_mhz_tx_max_nss_eht_mcs_0_9", amxd_object_get_value(uint8_t, pVendorObj, "EhtMcsMap320MHzTxMcs09", NULL));
+        swl_mapCharFmt_addValInt32(configMap, "eht_mcs_map_320_mhz_tx_max_nss_eht_mcs_10_11", amxd_object_get_value(uint8_t, pVendorObj, "EhtMcsMap320MHzTxMcs1011", NULL));
+        swl_mapCharFmt_addValInt32(configMap, "eht_mcs_map_320_mhz_rx_max_nss_eht_mcs_10_11", amxd_object_get_value(uint8_t, pVendorObj, "EhtMcsMap320MHzRxMcs1011", NULL));
+        swl_mapCharFmt_addValInt32(configMap, "eht_mcs_map_320_mhz_rx_max_nss_eht_mcs_12_13", amxd_object_get_value(uint8_t, pVendorObj, "EhtMcsMap320MHzRxMcs1213", NULL));
+        swl_mapCharFmt_addValInt32(configMap, "eht_mcs_map_320_mhz_tx_max_nss_eht_mcs_12_13", amxd_object_get_value(uint8_t, pVendorObj, "EhtMcsMap320MHzTxMcs1213", NULL));
+        swl_mapCharFmt_addValInt32(configMap, "eht_phy_320_mhz_in_6_ghz", amxd_object_get_value(uint8_t, pVendorObj, "EhtPhy320MHzIn6GHz", NULL));
+        swl_mapCharFmt_addValInt32(configMap, "punct_bitmap", amxd_object_get_value(uint16_t, pVendorObj, "PunctureBitMap", NULL));
+        swl_mapCharFmt_addValInt32(configMap, "rnr_6g_op_class_137_allowed", amxd_object_get_value(bool, pVendorObj, "Rnr6gOpClass137Allowed", NULL));
+    }
+    if (testbed_mode) {
+        swl_mapCharFmt_addValInt32(configMap, "he_operation_txop_duration_rts_threshold", amxd_object_get_value(uint32_t, pVendorObj, "HeOpTxopDurationRtsThreshold", NULL));
+        swl_mapCharFmt_addValInt32(configMap, "he_phy_su_beamformee_capable", amxd_object_get_value(bool, pVendorObj, "HePhySuBeamformeeCapable", NULL));
+        swl_mapCharFmt_addValInt32(configMap, "he_phy_su_beamformer_capable", amxd_object_get_value(bool, pVendorObj, "HePhySuBeamformerCapable", NULL));
+        swl_mapCharFmt_addValInt32(configMap, "he_phy_beamformee_sts_for_less_than_or_equal_80mhz", amxd_object_get_value(bool, pVendorObj, "HePhyBeamformeeStsLesOrEq80Mhz", NULL));
+        swl_mapCharFmt_addValInt32(configMap, "he_phy_beamformee_sts_for_greater_than_80mhz", amxd_object_get_value(bool, pVendorObj, "HePhyBeamformeeStsGreater80Mhz", NULL));
+        swl_mapCharFmt_addValInt32(configMap, "he_phy_device_class", amxd_object_get_value(bool, pVendorObj, "HePhyDeviceClass", NULL));
+        swl_mapCharFmt_addValInt32(configMap, "he_phy_su_ppdu_with_1x_he_ltf_and_08_us_gi", amxd_object_get_value(bool, pVendorObj, "HePhySuPpdu1xHeLtfAnd08UsGi", NULL));
+        swl_mapCharFmt_addValInt32(configMap, "he_phy_su_ppdu_and_he_mu_with_4x_he_ltf_and_08us_gi", amxd_object_get_value(bool, pVendorObj, "HePhySuPpduHeMu4xHeLtf08UsGi", NULL));
+        swl_mapCharFmt_addValInt32(configMap, "he_phy_mu_beamformer_capable", amxd_object_get_value(bool, pVendorObj, "HePhyMuBeamformerCapable", NULL));
+        swl_mapCharFmt_addValInt32(configMap, "he_phy_ndp_with_4x_he_ltf_and_32_us_gi", amxd_object_get_value(bool, pVendorObj, "HePhyNdpWith4xHeLtfAnd32UsGi", NULL));
+        swl_mapCharFmt_addValInt32(configMap, "he_phy_ng_16_su_feedback", amxd_object_get_value(bool, pVendorObj, "HePhyNg16SuFeedback", NULL));
+        swl_mapCharFmt_addValInt32(configMap, "he_phy_ng_16_mu_feedback", amxd_object_get_value(bool, pVendorObj, "HePhyNg16MuFeedback", NULL));
+        swl_mapCharFmt_addValInt32(configMap, "he_phy_number_of_sounding_dimensions_for_less_than_or_equal_80mhz", amxd_object_get_value(bool, pVendorObj, "HePhyNumSoundDimenLeOrEq80Mhz", NULL));
+        swl_mapCharFmt_addValInt32(configMap, "he_phy_number_of_sounding_dimensions_for_greater_than_80mhz", amxd_object_get_value(bool, pVendorObj, "HePhyNumSoundDimenGreater80Mhz", NULL));
+        swl_mapCharFmt_addValInt32(configMap, "he_phy_triggered_su_beamforming_feedback", amxd_object_get_value(bool, pVendorObj, "HePhyTriggerSuBeamformFeedback", NULL));
+        swl_mapCharFmt_addValInt32(configMap, "he_phy_doppler_rx", amxd_object_get_value(bool, pVendorObj, "HePhyDopplerRx", NULL));
+        swl_mapCharFmt_addValInt32(configMap, "he_phy_doppler_tx", amxd_object_get_value(bool, pVendorObj, "HePhyDopplerTx", NULL));
+        swl_mapCharFmt_addValInt32(configMap, "he_phy_full_bandwidth_ul_mu_mimo", amxd_object_get_value(bool, pVendorObj, "HePhyFullBandwidthUlMuMimo", NULL));
+        swl_mapCharFmt_addValInt32(configMap, "he_phy_partial_bandwidth_ul_mu_mimo", amxd_object_get_value(bool, pVendorObj, "HePhyPartialBandwidthUlMuMimo", NULL));
+        swl_mapCharFmt_addValInt32(configMap, "he_phy_partial_bandwidth_extended_range", amxd_object_get_value(bool, pVendorObj, "HePhyPartialBWExtendedRange", NULL));
+        swl_mapCharFmt_addValInt32(configMap, "he_phy_triggered_cqi_feedback", amxd_object_get_value(bool, pVendorObj, "HePhyTriggeredCqiFeedback", NULL));
+        swl_mapCharFmt_addValInt32(configMap, "he_phy_ppe_thresholds_present", amxd_object_get_value(bool, pVendorObj, "HePhyPpeThresholdsPresent", NULL));
+        swl_mapCharFmt_addValInt32(configMap, "he_phy_codebook_size42_for_su_support", amxd_object_get_value(bool, pVendorObj, "HePhyCodebookSize42SuSupport", NULL));
+        swl_mapCharFmt_addValInt32(configMap, "he_phy_codebook_size75_for_mu_support", amxd_object_get_value(bool, pVendorObj, "HePhyCodebookSize75MuSupport", NULL));
+        swl_mapCharFmt_addValInt32(configMap, "he_phy_power_boost_factor_alpha_support", amxd_object_get_value(bool, pVendorObj, "HePhyPowBoostFactAlphaSupport", NULL));
+        swl_mapCharFmt_addValInt32(configMap, "he_mac_om_control_ul_mu_data_disable_rx_support", amxd_object_get_value(bool, pVendorObj, "HeMacOmCtrlMuDisableRxSupport", NULL));
+        swl_mapCharFmt_addValInt32(configMap, "he_mac_ul_2x996tone_ru_support", amxd_object_get_value(bool, pVendorObj, "HeMacUl2x996ToneRuSupport", NULL));
+        swl_mapCharFmt_addValInt32(configMap, "he_mac_ack_enabled_aggregation_support", amxd_object_get_value(bool, pVendorObj, "HeMacAckEnabledAggrSupport", NULL));
+        swl_mapCharFmt_addValInt32(configMap, "he_mac_broadcast_twt_support", amxd_object_get_value(bool, pVendorObj, "HeMacBroadcastTwtSupport", NULL));
+        swl_mapCharFmt_addValInt32(configMap, "he_phy_dcm_max_bw", amxd_object_get_value(bool, pVendorObj, "HePhyDcmMaxBw", NULL));
+        swl_mapCharFmt_addValInt32(configMap, "he_phy_longer_than_16_he_sigb_ofdm_sym_support", amxd_object_get_value(bool, pVendorObj, "HePhyLong16HeSigOfdmSymSupport", NULL));
+        swl_mapCharFmt_addValInt32(configMap, "he_mac_ndp_feedback_report_support", amxd_object_get_value(bool, pVendorObj, "HeMacNdpFeedbackReportSupport", NULL));
+        swl_mapCharFmt_addValInt32(configMap, "he_phy_rx_1024_qam_lt_242_tone_ru_support", amxd_object_get_value(bool, pVendorObj, "HePhyRx1024QLt242ToneRuSupport", NULL));
+        swl_mapCharFmt_addValInt32(configMap, "he_phy_rx_full_bw_su_using_mu_comp_sigb", amxd_object_get_value(bool, pVendorObj, "HePhyRxFullBwSuUsingMuCompSigb", NULL));
+        swl_mapCharFmt_addValInt32(configMap, "he_phy_rx_full_bw_su_using_mu_non_comp_sigb", amxd_object_get_value(bool, pVendorObj, "HePhyRxFulBwUsingMuNonComSigb", NULL));
+        swl_mapCharFmt_addValInt32(configMap, "he_phy_stbc_tx_less_than_or_equal_80mhz", amxd_object_get_value(bool, pVendorObj, "HePhyStbcTxLessThanOrEq80Mhz", NULL));
+        swl_mapCharFmt_addValInt32(configMap, "he_phy_stbc_tx_greater_than_80mhz", amxd_object_get_value(bool, pVendorObj, "HePhyStbcTxGreaterThan80Mhz", NULL));
+        swl_mapCharFmt_addValInt32(configMap, "he_operation_er_su_disable", amxd_object_get_value(bool, pVendorObj, "HeOperationErSuDisable", NULL));
+        swl_mapCharFmt_addValInt32(configMap, "he_phy_er_su_ppdu_4x_ltf_8us_gi", amxd_object_get_value(bool, pVendorObj, "HePhyErSuPpdu4xLtf8UsGi", NULL));
+        swl_mapCharFmt_addValInt32(configMap, "he_phy_preamble_puncturing_rx", amxd_object_get_value(bool, pVendorObj, "HePhyPreamblePuncturingRx", NULL));
+        swl_mapCharFmt_addValInt32(configMap, "he_mac_multi_tid_aggregation_tx_support", amxd_object_get_value(bool, pVendorObj, "HeMacMultiTidAggrTxSupport", NULL));
+        swl_mapCharFmt_addValInt32(configMap, "he_mac_multi_tid_aggregation_rx_support", amxd_object_get_value(bool, pVendorObj, "HeMacMultiTidAggrRxSupport", NULL));
+        swl_mapCharFmt_addValInt32(configMap, "eht_phy_num_sounding_dim_80_mhz_or_below", amxd_object_get_value(bool, pVendorObj, "EhtPhyNumSoundDim80MhzOrBelow", NULL));
+        swl_mapCharFmt_addValInt32(configMap, "eht_phy_num_sounding_dim_160_mhz", amxd_object_get_value(bool, pVendorObj, "EhtPhyNumSoundingDim160Mhz", NULL));
+        swl_mapCharFmt_addValInt32(configMap, "eht_phy_num_sounding_dim_320_mhz", amxd_object_get_value(bool, pVendorObj, "EhtPhyNumSoundingDim320Mhz", NULL));
+        swl_mapCharFmt_addValInt32(configMap, "eht_phy_mu_beamformer_bw_80_mhz_or_below", amxd_object_get_value(bool, pVendorObj, "EhtPhyMuBeamformerBw80MhzBelow", NULL));
+        swl_mapCharFmt_addValInt32(configMap, "eht_phy_mu_beamformer_bw_160_mhz", amxd_object_get_value(bool, pVendorObj, "EhtPhyMuBeamformerBw160Mhz", NULL));
+        swl_mapCharFmt_addValInt32(configMap, "eht_phy_mu_beamformer_bw_320_mhz", amxd_object_get_value(bool, pVendorObj, "EhtPhyMuBeamformerBw320Mhz", NULL));
+        swl_mapCharFmt_addValInt32(configMap, "eht_phy_ndp_4x_eht_ltf_and_3_2_us_gi", amxd_object_get_value(bool, pVendorObj, "EhtPhyNdp4xEhtLtfAnd32UsGi", NULL));
+        swl_mapCharFmt_addValInt32(configMap, "eht_phy_partial_bw_ul_mu_mimo", amxd_object_get_value(bool, pVendorObj, "EhtPhyPartialBwUlMuMimo", NULL));
+        swl_mapCharFmt_addValInt32(configMap, "eht_phy_beamformee_ss_80_mhz_or_below", amxd_object_get_value(bool, pVendorObj, "EhtPhyBeamformeeSs80MhzOrBelow", NULL));
+        swl_mapCharFmt_addValInt32(configMap, "eht_phy_beamformee_ss_160_mhz", amxd_object_get_value(bool, pVendorObj, "EhtPhyBeamformeeSs160Mhz", NULL));
+        swl_mapCharFmt_addValInt32(configMap, "eht_phy_beamformee_ss_320_mhz", amxd_object_get_value(bool, pVendorObj, "EhtPhyBeamformeeSs320Mhz", NULL));
+        swl_mapCharFmt_addValInt32(configMap, "eht_phy_eht_dup_in_6_ghz", amxd_object_get_value(bool, pVendorObj, "EhtPhyEhtDupIn6Ghz", NULL));
+        swl_mapCharFmt_addValInt32(configMap, "eht_phy_20_mhz_operating_sta_rx_ndp_with_wider_bw", amxd_object_get_value(bool, pVendorObj, "EhtPhy20MhzOpStaRxNdpWiderBw", NULL));
+        swl_mapCharFmt_addValInt32(configMap, "eht_phy_ng_16_su_feedback", amxd_object_get_value(bool, pVendorObj, "EhtPhyNg16SuFeedback", NULL));
+        swl_mapCharFmt_addValInt32(configMap, "eht_phy_ng_16_mu_feedback", amxd_object_get_value(bool, pVendorObj, "EhtPhyNg16MuFeedback", NULL));
+        swl_mapCharFmt_addValInt32(configMap, "eht_phy_codebook_size_4_2_su_fb", amxd_object_get_value(bool, pVendorObj, "EhtPhyCodebookSize42SuFb", NULL));
+        swl_mapCharFmt_addValInt32(configMap, "eht_phy_codebook_size_75_5_mu_fb", amxd_object_get_value(bool, pVendorObj, "EhtPhyCodebookSize755MuFb", NULL));
+        swl_mapCharFmt_addValInt32(configMap, "eht_phy_trig_su_bf_fb", amxd_object_get_value(bool, pVendorObj, "EhtPhyTrigSuBfFb", NULL));
+        swl_mapCharFmt_addValInt32(configMap, "eht_phy_trig_cqi_fb", amxd_object_get_value(bool, pVendorObj, "EhtPhyTrigCqiFb", NULL));
+        swl_mapCharFmt_addValInt32(configMap, "eht_phy_partial_bw_dl_mu_mimo", amxd_object_get_value(bool, pVendorObj, "EhtPhyPartialBwDlMuMimo", NULL));
+        swl_mapCharFmt_addValInt32(configMap, "eht_phy_psr_based_sr", amxd_object_get_value(bool, pVendorObj, "EhtPhyPsrBasedSr", NULL));
+        swl_mapCharFmt_addValInt32(configMap, "eht_phy_eht_mu_ppdu_with_4x_eht_ltf_and_0_8_us_gi", amxd_object_get_value(bool, pVendorObj, "EhtPhyEhtMuPpdu4xEhtLtf08UsGi", NULL));
+        swl_mapCharFmt_addValInt32(configMap, "eht_phy_rx_1024_qam_and_4096_qam_below_242_ru", amxd_object_get_value(bool, pVendorObj, "EhtPhyRx1024Qam4096QamBel242Ru", NULL));
+        swl_mapCharFmt_addValInt32(configMap, "eht_phy_max_num_of_supported_eht_ltfs", amxd_object_get_value(bool, pVendorObj, "EhtPhyMaxNumOfSupportedEhtLtfs", NULL));
+        swl_mapCharFmt_addValInt32(configMap, "eht_phy_mcs_15", amxd_object_get_value(bool, pVendorObj, "EhtPhyMcs15", NULL));
+        swl_mapCharFmt_addValInt32(configMap, "eht_phy_non_ofdma_ul_mu_mimo_bw_80_mhz_or_below", amxd_object_get_value(bool, pVendorObj, "EhtPhyNonOfdmaMuMimo80MhzBelow", NULL));
+        swl_mapCharFmt_addValInt32(configMap, "eht_phy_non_ofdma_ul_mu_mimo_bw_160_mhz", amxd_object_get_value(bool, pVendorObj, "EhtPhyNonOfdmaUlMuMimoBw160Mhz", NULL));
+        swl_mapCharFmt_addValInt32(configMap, "eht_phy_non_ofdma_ul_mu_mimo_bw_320_mhz", amxd_object_get_value(bool, pVendorObj, "EhtPhyNonOfdmaUlMuMimoBw320Mhz", NULL));
+        swl_mapCharFmt_addValInt32(configMap, "sDynamicMuMinStationsInGroup=4", amxd_object_get_value(uint8_t, pVendorObj, "SetDynamicMuMinStationsInGroup", NULL));
+        swl_mapCharFmt_addValInt32(configMap, "sDynamicMuMaxStationsInGroup", amxd_object_get_value(uint8_t, pVendorObj, "SetDynamicMuMaxStationsInGroup", NULL));
+        swl_mapCharFmt_addValInt32(configMap, "sDynamicMuCdbConfig", amxd_object_get_value(uint8_t, pVendorObj, "SetDynamicMuCdbConfig", NULL));
+        swl_mapCharFmt_addValInt32(configMap, "rnr_tbtt_mld_non_zero_pad", amxd_object_get_value(uint8_t, pVendorObj, "RnrTbttMldNonZeroPad", NULL));
+    }
+}
+
 static swl_rc_ne s_mxl_rad_configObssScanParams(amxd_object_t* pVendorObj, swl_mapChar_t* configMap)
 {
     amxd_object_t* obssObj = amxd_object_get(pVendorObj, "ObssScanParams");
@@ -454,6 +641,9 @@ static swl_rc_ne s_mxl_rad_updateConfig(T_Radio* pRad, mxl_VendorData_t* pRadVen
     uint32_t subBandDFS = amxd_object_get_value(uint32_t, pVendorObj, "SubBandDFS", NULL);
     uint16_t apMaxSta = amxd_object_get_value(uint16_t, pVendorObj, "ApMaxNumSta", NULL);
     uint16_t punctureBitMap = amxd_object_get_value(uint16_t, pVendorObj, "PunctureBitMap", NULL);
+    uint32_t max_bss = wld_rad_countMappedAPs(pRad);
+    char *dfsChStateFile = amxd_object_get_value(cstring_t, pVendorObj, "DfsChStateFile", NULL);
+    char *setCcaTh = amxd_object_get_value(cstring_t, pVendorObj, "SetCcaTh", NULL);
 #ifdef CONFIG_VENDOR_MXL_PROPRIETARY
     swl_radBw_e curBandwidth = pRad->operatingChannelBandwidth;
     swl_chanspec_t tgtChspec = wld_chanmgt_getTgtChspec(pRad);
@@ -481,6 +671,8 @@ static swl_rc_ne s_mxl_rad_updateConfig(T_Radio* pRad, mxl_VendorData_t* pRadVen
         if(duplicateBeacon) {
             swl_mapCharFmt_addValInt32(configMap, "duplicate_beacon_bw", duplicateBeaconBw);
         }
+        /* mod-whm should supply the max_bss count to the hostapd for the MBSSID feature */
+        swl_mapCharFmt_addValInt32(configMap, "max_bss", max_bss);
 #ifdef CONFIG_VENDOR_MXL_PROPRIETARY
         if(pRad->autoChannelEnable) {
             /* Setting the acs_eht_mode in the hostapd_conf when ACS is enabled in case of 320MHz*/
@@ -543,15 +735,20 @@ static swl_rc_ne s_mxl_rad_updateConfig(T_Radio* pRad, mxl_VendorData_t* pRadVen
         WHM_MXL_GT_SET_PARAM(backgroundCac, 0, configMap, "background_cac");
     }
 
-    if(!swl_str_matches(amxd_object_get_value(cstring_t, pVendorObj, "DfsChStateFile", NULL), "")) {
-        swl_mapCharFmt_addValStr(configMap, "dfs_channels_state_file_location", amxd_object_get_value(cstring_t, pVendorObj, "DfsChStateFile", NULL));
+    if(!swl_str_isEmpty(dfsChStateFile)) {
+        swl_mapCharFmt_addValStr(configMap, "dfs_channels_state_file_location", "%s", dfsChStateFile);
     }
-    if(!swl_str_matches(amxd_object_get_value(cstring_t, pVendorObj, "SetCcaTh", NULL), "-62 -62 -72 -72 -69")) {
-        swl_mapCharFmt_addValStr(configMap, "sCcaTh", amxd_object_get_value(cstring_t, pVendorObj, "SetCcaTh", NULL));
+    free(dfsChStateFile);
+    if(!swl_str_matches(setCcaTh, "-62 -62 -72 -72 -69")) {
+        swl_mapCharFmt_addValStr(configMap, "sCcaTh", "%s", setCcaTh);
     }
+    free(setCcaTh);
 #ifdef CONFIG_VENDOR_MXL_PROPRIETARY
     if(amxd_object_get_value(int32_t, pVendorObj, "DfsDebugChan", NULL) != -1) {
         swl_mapCharFmt_addValInt32(configMap, "dfs_debug_chan", amxd_object_get_value(int32_t, pVendorObj, "DfsDebugChan", NULL));
+    }
+    if(amxd_object_get_value(int32_t, pVendorObj, "ZwdfsDebugChan", NULL) != -1) {
+        swl_mapCharFmt_addValInt32(configMap, "zwdfs_debug_chan", amxd_object_get_value(int32_t, pVendorObj, "ZwdfsDebugChan", NULL));
     }
 #endif /* CONFIG_VENDOR_MXL_PROPRIETARY */
     /* Configure 80211AX Only Params */
@@ -576,24 +773,28 @@ static swl_rc_ne s_mxl_rad_updateConfig(T_Radio* pRad, mxl_VendorData_t* pRadVen
     /* Prepare hostapd_conf ACS parameters */
     whm_mxl_rad_acsUpdateConfigMap(pRad, pRadVendor, configMap);
     SAH_TRACEZ_INFO(ME, "%s autoChannelEnable : %d", pRad->Name, pRad->autoChannelEnable);
-    if(pRad->autoChannelEnable) {
+    if (pRad->autoChannelEnable) {
          /* Set hostapd_conf autoChannelEnable */
         SAH_TRACEZ_INFO(ME, "%s autoChannelEnable : %d", pRad->Name, pRad->autoChannelEnable);
         swl_mapCharFmt_addValStr(configMap, "channel", "%s", "acs_smart");
         /* Reset eht/vht/he seg0_idx in case ACS is enabled */
-        if(wld_rad_checkEnabledRadStd(pRad, SWL_RADSTD_AC)) {
+        if (wld_rad_checkEnabledRadStd(pRad, SWL_RADSTD_AC)) {
             swl_mapCharFmt_addValInt32(configMap, "vht_oper_centr_freq_seg0_idx", 0);
         }
-        if(wld_rad_checkEnabledRadStd(pRad, SWL_RADSTD_AX)) {
+        if (wld_rad_checkEnabledRadStd(pRad, SWL_RADSTD_AX)) {
             swl_mapCharFmt_addValInt32(configMap, "he_oper_centr_freq_seg0_idx", 0);
         }
-        if(wld_rad_checkEnabledRadStd(pRad, SWL_RADSTD_BE)) {
+        if (wld_rad_checkEnabledRadStd(pRad, SWL_RADSTD_BE)) {
             swl_mapCharFmt_addValInt32(configMap, "eht_oper_centr_freq_seg0_idx", 0);
         }
-    }
-    else
-#endif /* CONFIG_VENDOR_MXL_PROPRIETARY */
+        if (pRadVendor->bgAcsInterval) {
+            /* Set bg acs interval in minutes */
+            swl_mapCharFmt_addValInt32(configMap, "acs_bgscan_interval", pRadVendor->bgAcsInterval);
+        }
+    } else if (pRadVendor->firstNonDfs) {
+#else
     if (pRadVendor->firstNonDfs) {
+#endif /* CONFIG_VENDOR_MXL_PROPRIETARY */
         SAH_TRACEZ_INFO(ME, "%s first_non_dfs : %d", pRad->Name, pRadVendor->firstNonDfs);
         /* Set hostapd_conf first_non_dfs parameters */
         swl_mapCharFmt_addValStr(configMap, "channel", "%s", "first_non_dfs");
@@ -608,6 +809,11 @@ static swl_rc_ne s_mxl_rad_updateConfig(T_Radio* pRad, mxl_VendorData_t* pRadVen
 
     /* Prepare Start After parameters */
     whm_mxl_rad_delayedStartUpdateConfigMap(pRadVendor, configMap);
+    
+    /* Certification Params*/
+    if (whm_mxl_isCertModeEnabled()) {
+        whm_mxl_rad_configCertification(pRad, pVendorObj, configMap);
+    }
 
     SAH_TRACEZ_OUT(ME);
     return SWL_RC_OK;
@@ -621,17 +827,6 @@ static swl_rc_ne s_rad_zwdfsUpdateConfigMap(swl_mapChar_t* configMap) {
      * In this section we'll retrieve the main 5GHz radio config based on the frequency band.
      * After that, an override of HT/VHT/HE caps is needed to be able to start hostapd for the ZW DFS radio.
      */
-    /* Apply vendor paramters and reg domain */
-    T_Radio* pRad5GHzData = wld_getRadioByFrequency(SWL_FREQ_BAND_5GHZ);
-    if(pRad5GHzData) {
-        swl_mapCharFmt_addValStr(configMap, "country_code", "%s", pRad5GHzData->regulatoryDomain);
-        mxl_VendorData_t* pRad5GHzVendor = mxl_rad_getVendorData(pRad5GHzData);
-        amxd_object_t* zwdfsDebug = amxd_object_get(pRad5GHzVendor->pBus, "ZwdfsDebug");
-        ASSERT_NOT_NULL(zwdfsDebug, SWL_RC_ERROR, ME, "No ZwdfsDebug vendor obj");
-#ifdef CONFIG_VENDOR_MXL_PROPRIETARY
-        WHM_MXL_NE_SET_PARAM(amxd_object_get_value(int32_t, zwdfsDebug, "DfsDebugChan", NULL), -1, configMap, "dfs_debug_chan");
-#endif /* CONFIG_VENDOR_MXL_PROPRIETARY */
-    }
     swl_mapCharFmt_addValStr(configMap, "channel", "%s", "first_non_dfs");
     swl_mapCharFmt_addValStr(configMap, "ht_capab", "%s", "[HT40+][HT40-][LDPC][SHORT-GI-20][SHORT-GI-40][TX-STBC][MAX-AMSDU-7935][DSSS_CCK-40]");
     swl_mapCharFmt_addValStr(configMap, "op_class", "%s", "130");
@@ -712,8 +907,9 @@ static void whm_mxl_vap_mloConfig(T_AccessPoint* pAP, amxd_object_t* pVendorObj,
     swl_mapCharFmt_addValStr(configMap, "wds_single_ml_assoc", "%d", wdsSingleMlAssoc);
     swl_mapCharFmt_addValStr(configMap, "wds_primary_link", "%d", wdsPrimaryLink);
     if(!(swl_str_isEmpty(apMldMac))) {
-        swl_mapCharFmt_addValStr(configMap, "ap_mld_mac", apMldMac);
+        swl_mapCharFmt_addValStr(configMap, "ap_mld_mac", "%s", apMldMac);
     }
+    free(apMldMac);
 }
 
 static void whm_mxl_vap_softBlockConfig(T_AccessPoint* pAP, amxd_object_t* pVendorObj, swl_mapChar_t* configMap) {
@@ -749,11 +945,36 @@ static void s_whm_mxl_vap_securityConfig(T_AccessPoint* pAP, swl_mapChar_t* conf
                     SAH_TRACEZ_INFO(ME, "%s Set sae_pwe",pAP->alias);
                     swl_mapCharFmt_addValStr(configMap, "sae_pwe", "%s", "2");
                 }
+                if(whm_mxl_isCertModeEnabled() && wld_rad_checkEnabledRadStd(pAP->pRadio, SWL_RADSTD_BE)) {
+                    /*
+                    * Overriding the rsn_pairwise and wpa_pairwise as one of the
+                    * test case is failing in checking for the suite count to be 1
+                    * So this is a workaround till WFA updates their sniffer validation checks
+                    */
+                    if(!whm_mxl_isWpa3CertModeEnabled()) {
+                        SAH_TRACEZ_INFO(ME, "%s Overriding the wpa_pairwise and rsn_pairwise",pAP->alias);
+                        swl_mapChar_delete(configMap, "rsn_pairwise");
+                        swl_mapChar_delete(configMap, "wpa_pairwise");
+                        swl_mapCharFmt_addValStr(configMap, "wpa_pairwise", "%s", "GCMP-256");
+                        swl_mapCharFmt_addValStr(configMap, "rsn_pairwise", "%s", "GCMP-256");
+                    }
+                    /*
+                    * Overriding the sae_pwe value to 1 for all bands in BE mode
+                    * So that the AP-MLD formed between the 2.4GHz + 6GHZ and 5GHZ + 6GHz
+                    * Can come up without issue
+                    */
+                    SAH_TRACEZ_INFO(ME, "%s Set sae_pwe",pAP->alias);
+                    swl_mapCharFmt_addValStr(configMap, "sae_pwe", "%s", "1");
+                }
+            }
+            /* Overwrite wpa_key_mgmt to SAE-EXT-KEY to support AKM24 */
+            if(mxlVapVendorData->saeExtKey) {
+                swl_mapCharFmt_addValStr(configMap, "wpa_key_mgmt", "%s", "SAE-EXT-KEY");
             }
             break;
         case SWL_SECURITY_APMODE_OWE:
             if(mxlVapVendorData && !swl_str_isEmpty(mxlVapVendorData->OWETransBSSID)) {
-                swl_mapCharFmt_addValStr(configMap, "owe_transition_bssid", mxlVapVendorData->OWETransBSSID);
+                swl_mapCharFmt_addValStr(configMap, "owe_transition_bssid", "%s", mxlVapVendorData->OWETransBSSID);
             }
             if(mxlVapVendorData && !swl_str_isEmpty(mxlVapVendorData->OWETransSSID)) {
                 /* Hostapd requires OWE Tranisiton SSID to be included in double quotes */
@@ -762,18 +983,153 @@ static void s_whm_mxl_vap_securityConfig(T_AccessPoint* pAP, swl_mapChar_t* conf
             break;
         case SWL_SECURITY_APMODE_NONE:
             if(mxlVapVendorData && !swl_str_isEmpty(mxlVapVendorData->OWETransBSSID)) {
-                swl_mapChar_add(configMap, "owe_transition_bssid", mxlVapVendorData->OWETransBSSID);
+                swl_mapCharFmt_addValStr(configMap, "owe_transition_bssid", "%s", mxlVapVendorData->OWETransBSSID);
             }
             if(mxlVapVendorData && !swl_str_isEmpty(mxlVapVendorData->OWETransSSID)) {
                 /* Hostapd requires OWE Tranisiton SSID to be included in double quotes */
                 swl_mapCharFmt_addValStr(configMap, "owe_transition_ssid", "\"%s\"", mxlVapVendorData->OWETransSSID);
             }
             break;
+        case SWL_SECURITY_APMODE_WPA2_E:
+        case SWL_SECURITY_APMODE_WPA_WPA2_E:
+        case SWL_SECURITY_APMODE_WPA2_WPA3_E:
+        case SWL_SECURITY_APMODE_WPA3_E:
+            if(whm_mxl_isCertModeEnabled()) {
+                if(swl_mapChar_has(configMap, "auth_server_shared_secret")) {
+                    swl_mapChar_delete(configMap, "auth_server_shared_secret");
+                }
+                if(mxlVapVendorData && !swl_str_isEmpty(mxlVapVendorData->radiusSecretKey)) {
+                    swl_mapChar_add(configMap, "auth_server_shared_secret", mxlVapVendorData->radiusSecretKey);
+                }
+            }
         default:
             break;
     }
 
+    // Configure in WPA3 Personal Compatibility Mode
+    if (mxlVapVendorData->EnableWPA3PersonalCompatibility == true) {
+        // Restore below parameters from AP config.
+        swl_mapCharFmt_addValStr(configMap, "wpa_passphrase", "%s", pAP->keyPassPhrase);
+        if(!swl_str_isEmpty(pAP->saePassphrase)) {
+            swl_mapChar_add(configMap, "sae_password", pAP->saePassphrase);
+        }
+        swl_mapCharFmt_addValInt32(configMap, "wpa_group_rekey", pAP->rekeyingInterval);
+        swl_mapChar_add(configMap, "wpa_ptk_rekey", "0");
+
+        // Clear existing Security Configuration that might conflict with this mode.
+        swl_mapChar_delete(configMap, "wpa");
+        swl_mapChar_delete(configMap, "wpa_key_mgmt");
+        swl_mapChar_delete(configMap, "rsn_pairwise");
+        swl_mapChar_delete(configMap, "group_cipher");
+        swl_mapChar_delete(configMap, "ieee80211w");
+        swl_mapChar_delete(configMap, "sae_pwe");
+        swl_mapChar_delete(configMap, "sae_require_mfp");
+        swl_mapChar_delete(configMap, "rsn_override_key_mgmt");
+        swl_mapChar_delete(configMap, "rsn_override_pairwise");
+        swl_mapChar_delete(configMap, "rsn_override_mfp");
+        swl_mapChar_delete(configMap, "rsn_override_key_mgmt_2");
+        swl_mapChar_delete(configMap, "rsn_override_pairwise_2");
+        swl_mapChar_delete(configMap, "rsn_override_mfp_2");
+
+        // Set Defaults for this mode
+        if (pAP->pRadio->operatingFrequencyBand == SWL_FREQ_BAND_EXT_2_4GHZ || pAP->pRadio->operatingFrequencyBand == SWL_FREQ_BAND_EXT_5GHZ) {
+            swl_mapCharFmt_addValStr(configMap, "wpa", "%s", "2");
+            swl_mapCharFmt_addValStr(configMap, "wpa_key_mgmt", "%s", "WPA-PSK");
+            swl_mapCharFmt_addValStr(configMap, "rsn_pairwise", "%s", "CCMP");
+            swl_mapCharFmt_addValStr(configMap, "group_cipher", "%s", "CCMP");
+            swl_mapCharFmt_addValStr(configMap, "ieee80211w", "%s", "0");
+            swl_mapCharFmt_addValStr(configMap, "rsn_override_key_mgmt", "%s", "SAE");
+            swl_mapCharFmt_addValStr(configMap, "rsn_override_pairwise", "%s", "CCMP");
+            swl_mapCharFmt_addValStr(configMap, "rsn_override_mfp", "%s", "2");
+            swl_mapCharFmt_addValStr(configMap, "rsn_override_key_mgmt_2", "%s", "SAE-EXT-KEY");
+            swl_mapCharFmt_addValStr(configMap, "rsn_override_pairwise_2", "%s", "GCMP-256");
+            swl_mapCharFmt_addValStr(configMap, "rsn_override_mfp_2", "%s", "2");
+        }
+        else if (pAP->pRadio->operatingFrequencyBand == SWL_FREQ_BAND_EXT_6GHZ) {
+            swl_mapCharFmt_addValStr(configMap, "wpa", "%s", "2");
+            swl_mapCharFmt_addValStr(configMap, "wpa_key_mgmt", "%s", "SAE");
+            swl_mapCharFmt_addValStr(configMap, "rsn_pairwise", "%s", "CCMP");
+            swl_mapCharFmt_addValStr(configMap, "group_cipher", "%s", "CCMP");
+            swl_mapCharFmt_addValStr(configMap, "ieee80211w", "%s", "2");
+            swl_mapCharFmt_addValStr(configMap, "sae_pwe", "%s", "1");
+            swl_mapCharFmt_addValStr(configMap, "sae_require_mfp", "%s", "1");
+            swl_mapCharFmt_addValStr(configMap, "rsn_override_key_mgmt_2", "%s", "SAE-EXT-KEY");
+            swl_mapCharFmt_addValStr(configMap, "rsn_override_pairwise_2", "%s", "GCMP-256");
+            swl_mapCharFmt_addValStr(configMap, "rsn_override_mfp_2", "%s", "2");
+        }
+    } else {
+        // Remove remnants of WPA3 Personal Compatibility Mode.
+        swl_mapChar_delete(configMap, "rsn_override_key_mgmt");
+        swl_mapChar_delete(configMap, "rsn_override_pairwise");
+        swl_mapChar_delete(configMap, "rsn_override_mfp");
+        swl_mapChar_delete(configMap, "rsn_override_key_mgmt_2");
+        swl_mapChar_delete(configMap, "rsn_override_pairwise_2");
+        swl_mapChar_delete(configMap, "rsn_override_mfp_2");
+    }
+
     SAH_TRACEZ_OUT(ME);
+}
+
+static void whm_mxl_vap_configCertification(T_AccessPoint* pAP, amxd_object_t* pVendorObj, swl_mapChar_t* configMap) {
+    ASSERT_NOT_NULL(pVendorObj, , ME, "pVendorObj is NULL");
+    mxl_VapVendorData_t* mxlVapVendorData = mxl_vap_getVapVendorData(pAP);
+    ASSERTS_NOT_NULL(mxlVapVendorData, , ME, "mxlVapVendorData is NULL");
+    char *setAggrConfig = amxd_object_get_value(cstring_t, pVendorObj, "SetAggrConfig", NULL);
+    char *groupMgmtCipher = amxd_object_get_value(cstring_t, pVendorObj, "GroupMgmtCipher", NULL);
+    char *groupCipher = amxd_object_get_value(cstring_t, pVendorObj, "GroupCipher", NULL);
+
+    if(!swl_str_isEmpty(setAggrConfig)) {
+        swl_mapCharFmt_addValStr(configMap, "sAggrConfig", "%s", setAggrConfig);
+    }
+    free(setAggrConfig);
+    swl_mapCharFmt_addValInt32(configMap, "s11nProtection", amxd_object_get_value(uint32_t, pVendorObj, "Set11nProtection", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "mld_mediumsync_present", amxd_object_get_value(bool, pVendorObj, "MldMediumsyncPresent", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "mlo_t2lm_support", amxd_object_get_value(bool, pVendorObj, "MloT2lmSupport", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "rrm_neighbor_report", amxd_object_get_value(bool, pVendorObj, "RrmNeighRpt", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "wnm_bss_trans_query_auto_resp", amxd_object_get_value(bool, pVendorObj, "WnmBssTransQueryAutoresp", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "eml_capab_transition_timeout", amxd_object_get_value(uint8_t, pVendorObj, "EmlCapabTransitionTimeout", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "ap_protected_keep_alive_required", amxd_object_get_value(int32_t, pVendorObj, "ApProtectedKeepAliveRequired", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "mld_mediumsync_duration", amxd_object_get_value(uint8_t, pVendorObj, "MldMediumsyncDuration", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "mld_mediumsync_ofdmedthresh", amxd_object_get_value(uint8_t, pVendorObj, "MldMediumsyncOfdmedthresh", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "mld_mediumsync_maxtxop", amxd_object_get_value(uint8_t, pVendorObj, "MldMediumsyncMaxtxop", NULL));
+    swl_mapCharFmt_addValStr(configMap, "group_mgmt_cipher", "%s", groupMgmtCipher);
+    free(groupMgmtCipher);
+    swl_mapCharFmt_addValStr(configMap, "group_cipher", "%s", groupCipher);
+    free(groupCipher);
+    swl_mapCharFmt_addValInt32(configMap, "wmm_ac_vi_cwmin", amxd_object_get_value(int32_t, pVendorObj, "WmmAcVICWMin", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "wmm_ac_vi_cwmax", amxd_object_get_value(int32_t, pVendorObj, "WmmAcVICWMax", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "wmm_ac_vi_aifs", amxd_object_get_value(int32_t, pVendorObj, "WmmAcVIAifs", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "wmm_ac_vi_txop_limit", amxd_object_get_value(int32_t, pVendorObj, "WmmAcVITXOP", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "wmm_ac_vi_acm", amxd_object_get_value(int32_t, pVendorObj, "WmmAcVIAcm", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "wmm_ac_vo_cwmin", amxd_object_get_value(int32_t, pVendorObj, "WmmAcVOCWMin", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "wmm_ac_vo_cwmax", amxd_object_get_value(int32_t, pVendorObj, "WmmAcVOCWMax", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "wmm_ac_vo_aifs", amxd_object_get_value(int32_t, pVendorObj, "WmmAcVOAifs", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "wmm_ac_vo_txop_limit", amxd_object_get_value(int32_t, pVendorObj, "WmmAcVOTXOP", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "wmm_ac_vo_acm", amxd_object_get_value(int32_t, pVendorObj, "WmmAcVOAcm", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "wmm_ac_be_cwmin", amxd_object_get_value(int32_t, pVendorObj, "WmmAcBECWMin", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "wmm_ac_be_cwmax", amxd_object_get_value(int32_t, pVendorObj, "WmmAcBECWMax", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "wmm_ac_be_aifs", amxd_object_get_value(int32_t, pVendorObj, "WmmAcBEAifs", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "wmm_ac_be_txop_limit", amxd_object_get_value(int32_t, pVendorObj, "WmmAcBETXOP", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "wmm_ac_be_acm", amxd_object_get_value(int32_t, pVendorObj, "WmmAcBEAcm", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "wmm_ac_bk_cwmin", amxd_object_get_value(int32_t, pVendorObj, "WmmAcBKCWMin", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "wmm_ac_bk_cwmax", amxd_object_get_value(int32_t, pVendorObj, "WmmAcBKCWMax", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "wmm_ac_bk_aifs", amxd_object_get_value(int32_t, pVendorObj, "WmmAcBKAifs", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "wmm_ac_bk_txop_limit", amxd_object_get_value(int32_t, pVendorObj, "WmmAcBKTXOP", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "wmm_ac_bk_acm", amxd_object_get_value(int32_t, pVendorObj, "WmmAcBKAcm", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "tx_queue_data1_cwmin", amxd_object_get_value(int32_t, pVendorObj, "TxQueueVICWMin", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "tx_queue_data1_cwmax", amxd_object_get_value(int32_t, pVendorObj, "TxQueueVICWMax", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "tx_queue_data1_aifs", amxd_object_get_value(int32_t, pVendorObj, "TxQueueVIAifs", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "tx_queue_data0_cwmin", amxd_object_get_value(int32_t, pVendorObj, "TxQueueVOCWMin", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "tx_queue_data0_cwmax", amxd_object_get_value(int32_t, pVendorObj, "TxQueueVOCWMax", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "tx_queue_data0_aifs", amxd_object_get_value(int32_t, pVendorObj, "TxQueueVOAifs", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "tx_queue_data2_cwmin", amxd_object_get_value(int32_t, pVendorObj, "TxQueueBECWMin", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "tx_queue_data2_cwmax", amxd_object_get_value(int32_t, pVendorObj, "TxQueueBECWMax", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "tx_queue_data2_aifs", amxd_object_get_value(int32_t, pVendorObj, "TxQueueBEAifs", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "tx_queue_data3_cwmin", amxd_object_get_value(int32_t, pVendorObj, "TxQueueBKCWMin", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "tx_queue_data3_cwmax", amxd_object_get_value(int32_t, pVendorObj, "TxQueueBKCWMax", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "tx_queue_data3_aifs", amxd_object_get_value(int32_t, pVendorObj, "TxQueueBKAifs", NULL));
+    WHM_MXL_NE_SET_PARAM(amxd_object_get_value(int32_t, pVendorObj, "GasCBDelay", NULL), 0, configMap, "gas_comeback_delay");
+    WHM_MXL_NE_SET_PARAM(amxd_object_get_value(bool, pVendorObj, "EhtMacEpcsPrioAccess", NULL), 0, configMap, "eht_mac_epcs_prio_access");
 }
 
 static swl_rc_ne s_mxl_vap_updateConfig(T_AccessPoint* pAP, swl_mapChar_t* configMap) {
@@ -789,6 +1145,7 @@ static swl_rc_ne s_mxl_vap_updateConfig(T_AccessPoint* pAP, swl_mapChar_t* confi
     int32_t mgmtFramePowerControl = amxd_object_get_value(int32_t, pVendorObj, "MgmtFramePowerControl", NULL);
     int32_t numResSta = amxd_object_get_value(int32_t, pVendorObj, "NumResSta", NULL);
     bool vendorVht = amxd_object_get_value(bool, pVendorObj, "VendorVht", NULL);
+    bool disablePbac = amxd_object_get_value(bool, pVendorObj, "DisablePbac", NULL);
 
     /* Configure parameters */
     /* Beacon parameters */
@@ -828,6 +1185,8 @@ static swl_rc_ne s_mxl_vap_updateConfig(T_AccessPoint* pAP, swl_mapChar_t* confi
     WHM_MXL_NE_SET_PARAM(amxd_object_get_value(uint32_t, pVendorObj, "DynamicMulticastMode", NULL), 0, configMap, "dynamic_multicast_mode");
     WHM_MXL_NE_SET_PARAM(amxd_object_get_value(uint32_t, pVendorObj, "DynamicMulticastRate", NULL), 1, configMap, "dynamic_multicast_rate");
     WHM_MXL_NE_SET_PARAM(amxd_object_get_value(uint32_t, pVendorObj, "SetBridgeMode", NULL), 0, configMap, "sBridgeMode");
+    WHM_MXL_NE_SET_PARAM(disablePbac, 0, configMap, "disable_pbac");
+    WHM_MXL_NE_SET_PARAM(amxd_object_get_value(uint32_t, pVendorObj, "MboCellAware", NULL), 1, configMap, "mbo_cell_aware");
     /* Soft Block parameters */
     whm_mxl_vap_softBlockConfig(pAP, pVendorObj, configMap);
     /* Security Parameters */
@@ -841,6 +1200,11 @@ static swl_rc_ne s_mxl_vap_updateConfig(T_AccessPoint* pAP, swl_mapChar_t* confi
       whm_mxl_vap_mloConfig(pAP, pVendorObj, configMap);
       /* Disable Beacon Protection is only supported for 11be */
       swl_mapCharFmt_addValInt32(configMap, "disable_beacon_prot", amxd_object_get_value(bool, pVendorObj, "DisableBeaconProtection", NULL));
+    }
+
+    /* Certification Params*/
+    if (whm_mxl_isCertModeEnabled()) {
+        whm_mxl_vap_configCertification(pAP, pVendorObj, configMap);
     }
 
     SAH_TRACEZ_OUT(ME);
@@ -864,6 +1228,8 @@ static swl_rc_ne s_mxl_vap_updateDummyVapConfig(T_AccessPoint* pAP, swl_mapChar_
     if (wld_rad_checkEnabledRadStd(pRad, SWL_RADSTD_BE)) {
         swl_mapCharFmt_addValInt32(configMap, "disable_11be", 0);
     }
+    /* disable pbac option in dummy vap regardless of config as it is not needed */
+    swl_mapCharFmt_addValInt32(configMap, "disable_pbac", 1);
 
     SAH_TRACEZ_OUT(ME);
     return SWL_RC_OK;
@@ -886,3 +1252,4 @@ swl_rc_ne whm_mxl_vap_updateConfigMap(T_AccessPoint* pAP, swl_mapChar_t* configM
 
     return rc;
 }
+

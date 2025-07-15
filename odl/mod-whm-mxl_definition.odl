@@ -85,6 +85,13 @@
                 %persistent int32 DfsDebugChan = -1 {
                     on action validate call whm_mxl_rad_validateDfsDebugChan_pvf;
                 }
+                /**
+                 * zwdfs_debug_chan, -1 means it is disabled and won't be written to hostapd conf
+                 * Valid values are ZWDFS_DEBUG_CHAN_MIN to ZWDFS_DEBUG_CHAN_MAX
+                 */
+                %persistent int32 ZwdfsDebugChan = -1 {
+                    on action validate call whm_mxl_rad_validateZwdfsDebugChan_pvf;
+                }
                 /*dfs_channels_state_file_location*/
                 %persistent string DfsChStateFile {
                     default "";
@@ -106,6 +113,474 @@
                 */
                 %persistent bool BackgroundCac = true {
                     on action validate call whm_mxl_rad_validateBackgroundCac_pvf;
+                }
+                %persistent bool TestBedMode {
+                    default false;
+                }
+                %persistent bool HePhyLdpcCodingInPayload {
+                    default true;
+                }
+                %persistent bool HeMacMsduAckEnabledMpduSupport {
+                    default true;
+                }
+                %persistent uint8 HeMacMaxAMpduLengthExponent {
+                        default 2;
+                }
+                %persistent bool HeMacOmControlSupport {
+                    default true;
+                }
+                %persistent bool HtMinMpduStartSpacing {
+                    default false;
+                }
+                %persistent bool MultibssEnable {
+                    default false;
+                }
+                %persistent string HeMcsNssRxMapLessOrEqual80Mhz{
+                    default "65530";
+                }
+                %persistent string HeMcsNssTxMapLessOrEqual80Mhz{
+                    default "65530";
+                }
+                %persistent string HeMcsNssRxHeMcsMap160Mhz{
+                    default "65530";
+                }
+                %persistent string HeMcsNssTxHeMcsMap160Mhz{
+                    default "65530";
+                }
+                %persistent string VhtMcsSetPart0{
+                    default "65530";
+                }
+                %persistent string VhtMcsSetPart1{
+                    default "65530";
+                }
+                %persistent bool HePhyMacNc {
+                    default true;
+                }
+                %persistent bool SrCtrlHesigaSpatialReuseVal15 {
+                    default false;
+                }
+                %persistent bool HeOperationCohostedBss {
+                    default true;
+                }
+               %persistent bool HeMuEdcaIePresent {
+                    default true;
+                }
+                %persistent bool HePhyDcmMaxConstellationTx {
+                    default false;
+                }
+                 %persistent bool HePhyDcmMaxConstellationRx {
+                    default true;
+                }
+                %persistent bool HePhyDcmMaxNssTx {
+                    default false;
+                }
+                %persistent bool HePhyDcmMaxNssRx {
+                    default false;
+                }
+                %persistent bool Ieee80211nAcAxCompat {
+                    default false;
+                }
+                %persistent bool EnableHeDebugMode {
+                    default true;
+                }
+                %persistent bool HeMuEdcaAcBeAifsn {
+                    default false;
+                }
+                %persistent uint8 HeMuEdcaAcBeEcwmin {
+                        default 15;
+                }
+                %persistent uint8 HeMuEdcaAcBeEcwmax {
+                        default 15;
+                }
+                %persistent uint8 HeMuEdcaAcBeTimer {
+                        default 255;
+                }
+                %persistent bool HeMuEdcaAcBkAifsn {
+                    default false;
+                }
+                %persistent uint8 HeMuEdcaAcBkAci {
+                        default 1;
+                }
+                %persistent uint8 HeMuEdcaAcBkEcwmin {
+                        default 15;
+                }
+                %persistent uint8 HeMuEdcaAcBkEcwmax {
+                        default 15;
+                }
+                %persistent uint8 HeMuEdcaAcBkTimer {
+                        default 255;
+                }
+               %persistent bool HeMuEdcaAcViAifsn {
+                    default false;
+                }
+                %persistent uint8 HeMuEdcaAcViAci {
+                        default 2;
+                }
+                %persistent uint8 HeMuEdcaAcViEcwmin {
+                        default 15;
+                }
+                %persistent uint8 HeMuEdcaAcViEcwmax {
+                        default 15;
+                }
+                %persistent uint8 HeMuEdcaAcViTimer {
+                        default 255;
+                }
+                %persistent bool HeMuEdcaAcVoAifsn {
+                    default false;
+                }
+                %persistent uint8 HeMuEdcaAcVoAci {
+                        default 2;
+                }
+                %persistent uint8 HeMuEdcaAcVoEcwmin {
+                        default 15;
+                }
+                %persistent uint8 HeMuEdcaAcVoEcwmax {
+                        default 15;
+                }
+                %persistent uint8 HeMuEdcaAcVoTimer {
+                        default 255;
+                }
+                %persistent bool EnableEhtDebugMode {
+                    default true;
+                }
+                %persistent bool EhtMacEhtOmControl {
+                    default true;
+                }
+                %persistent bool EhtMacRestrictedTwt {
+                    default false;
+                }
+                %persistent bool EhtMacTrigTxopSharingMode1 {
+                    default false;
+                }
+                %persistent bool EhtMacTrigTxopSharingMode2 {
+                    default false;
+                }
+                %persistent bool EhtPhyTrigMuBfPartialBwFb {
+                    default false;
+                }
+                %persistent bool EhtPhyMaxNc {
+                    default true;
+                }
+                %persistent uint8 EhtMcsMapLessOrEq80MHzRx09 {
+                        default 2;
+                }
+                %persistent uint8 EhtMcsMapLessOrEq80MHzTx09 {
+                        default 2;
+                }
+                %persistent uint8 EhtMcsMapLessOrEq80MHzRx1011 {
+                        default 2;
+                }
+                %persistent uint8 EhtMcsMapLessOrEq80MHzTx1011 {
+                        default 2;
+                }
+                %persistent uint8 EhtMcsMapLessOrEq80MHzRx1213 {
+                        default 2;
+                }
+                %persistent uint8 EhtMcsMapLessOrEq80MHzTx1213 {
+                        default 2;
+                }
+                %persistent uint8 EhtPhyMaxAmpduLenExpExt {
+                        default 2;
+                }
+                %persistent bool EhtPhySuBeamformer {
+                    default false;
+                }
+                %persistent bool EhtPhySuBeamformee {
+                    default false;
+                }
+                %persistent uint32 EhtMacMaxMpduLen {
+                    default 11000;
+                }
+                %persistent bool EhtPhyPpeThresholdsPresent {
+                    default false;
+                }
+                %persistent bool SetDynamicMuTypeDownLink {
+                    default false;
+                }
+                %persistent bool SetDynamicMuTypeUpLink {
+                    default false;
+                }
+                %persistent bool EhtMacScsTrafficDesc {
+                    default false;
+                }
+                %persistent int32 EhtMldTsfDiff {
+                    default 0;
+                }
+                %persistent uint8 EhtPhyCommonNominalPktPad {
+                        default 2;
+                }
+                %persistent uint8 EhtMcsMap160MHzRxMcs09 {
+                        default 2;
+                }
+                %persistent uint8 EhtMcsMap160MHzTxMcs09 {
+                        default 2;
+                }
+                %persistent uint8 EhtMcsMap160MHzTxMcs1011 {
+                        default 2;
+                }
+                %persistent uint8 EhtMcsMap160MHzRxMcs1011 {
+                        default 2;
+                }
+                %persistent uint8 EhtMcsMap160MHzTxMcs1213 {
+                        default 2;
+                }
+                %persistent uint8 EhtMcsMap160MHzRxMcs1213 {
+                        default 2;
+                }
+               %persistent uint8 EhtMcsMap320MHzRxMcs09 {
+                        default 2;
+                }
+                %persistent uint8 EhtMcsMap320MHzTxMcs09 {
+                        default 2;
+                }
+                %persistent uint8 EhtMcsMap320MHzRxMcs1011 {
+                        default 2;
+                }
+                %persistent uint8 EhtMcsMap320MHzTxMcs1011 {
+                        default 2;
+                }
+                %persistent uint8 EhtMcsMap320MHzRxMcs1213 {
+                        default 2;
+                }
+                %persistent uint8 EhtMcsMap320MHzTxMcs1213 {
+                        default 2;
+                }
+                %persistent uint8 EhtPhy320MHzIn6GHz {
+                        default 1;
+                }
+                %persistent bool AdvertiseEcsaIe {
+                    default true;
+                }
+                %persistent int32 SetMaxMpduLen {
+                    default -1;
+                }
+                %persistent bool HePhySuBeamformeeCapable {
+                    default false;
+                }
+                %persistent bool HePhySuBeamformerCapable {
+                    default false;
+                }
+                %persistent bool HePhyBeamformeeStsLesOrEq80Mhz {
+                    default false;
+                }
+                %persistent bool HePhyBeamformeeStsGreater80Mhz {
+                    default false;
+                }
+                %persistent bool HePhyDeviceClass {
+                    default false;
+                }
+                %persistent bool HePhySuPpdu1xHeLtfAnd08UsGi {
+                    default false;
+                }
+                %persistent bool HePhySuPpduHeMu4xHeLtf08UsGi {
+                    default false;
+                }
+                %persistent bool HePhyMuBeamformerCapable {
+                    default false;
+                }
+                %persistent bool HePhyNdpWith4xHeLtfAnd32UsGi {
+                    default false;
+                }
+                %persistent bool HePhyNg16SuFeedback {
+                    default false;
+                }
+                %persistent bool HePhyNg16MuFeedback {
+                    default false;
+                }
+                %persistent bool HePhyNumSoundDimenLeOrEq80Mhz {
+                    default false;
+                }
+                %persistent bool HePhyNumSoundDimenGreater80Mhz {
+                    default false;
+                }
+                %persistent bool HePhyTriggerSuBeamformFeedback {
+                    default false;
+                }
+                %persistent bool HePhyDopplerRx {
+                    default false;
+                }
+                %persistent bool HePhyDopplerTx {
+                    default false;
+                }
+                %persistent bool HePhyFullBandwidthUlMuMimo {
+                    default false;
+                }
+                %persistent bool HePhyPartialBandwidthUlMuMimo {
+                    default false;
+                }
+                %persistent bool HePhyPartialBWExtendedRange {
+                    default false;
+                }
+                %persistent bool HePhyTriggeredCqiFeedback {
+                    default false;
+                }
+                %persistent bool HePhyPpeThresholdsPresent {
+                    default true;
+                }
+                %persistent bool HePhyCodebookSize42SuSupport {
+                    default false;
+                }
+                %persistent bool HePhyCodebookSize75MuSupport {
+                    default false;
+                }
+                %persistent bool HePhyPowBoostFactAlphaSupport {
+                    default false;
+                }
+                %persistent bool HeMacOmCtrlMuDisableRxSupport {
+                    default false;
+                }
+                %persistent uint32 HeOpTxopDurationRtsThreshold {
+                    default 1023;
+                }
+                %persistent bool HeMacUl2x996ToneRuSupport {
+                    default false;
+                }
+                %persistent bool HeMacAckEnabledAggrSupport {
+                    default false;
+                }
+                %persistent bool HeMacBroadcastTwtSupport {
+                    default false;
+                }
+                %persistent bool HePhyDcmMaxBw {
+                    default false;
+                }
+                %persistent bool HePhyLong16HeSigOfdmSymSupport {
+                    default false;
+                }
+                %persistent bool HeMacNdpFeedbackReportSupport {
+                    default false;
+                }
+                %persistent bool HePhyRx1024QLt242ToneRuSupport {
+                    default false;
+                }
+                %persistent bool HePhyRxFullBwSuUsingMuCompSigb {
+                    default false;
+                }
+               %persistent bool HePhyRxFulBwUsingMuNonComSigb {
+                    default false;
+                }
+                %persistent bool HePhyStbcTxLessThanOrEq80Mhz {
+                    default false;
+                }
+                %persistent bool HePhyStbcTxGreaterThan80Mhz {
+                    default false;
+                }
+                %persistent bool HeOperationErSuDisable {
+                    default true;
+                }
+                %persistent bool HePhyErSuPpdu4xLtf8UsGi {
+                    default false;
+                }
+                %persistent bool HePhyPreamblePuncturingRx {
+                    default false;
+                }
+                %persistent bool HeMacMultiTidAggrTxSupport {
+                    default false;
+                }
+                %persistent bool HeMacMultiTidAggrRxSupport {
+                    default false;
+                }
+                %persistent bool EhtPhyNumSoundDim80MhzOrBelow {
+                    default false;
+                }
+                %persistent bool EhtPhyNumSoundingDim160Mhz {
+                    default false;
+                }
+                %persistent bool EhtPhyNumSoundingDim320Mhz {
+                    default false;
+                }
+                %persistent bool EhtPhyMuBeamformerBw80MhzBelow {
+                    default false;
+                }
+                %persistent bool EhtPhyMuBeamformerBw160Mhz {
+                    default false;
+                }
+                %persistent bool EhtPhyMuBeamformerBw320Mhz {
+                    default false;
+                }
+                %persistent bool EhtPhyNdp4xEhtLtfAnd32UsGi {
+                    default false;
+                }
+                %persistent bool EhtPhyPartialBwUlMuMimo {
+                    default false;
+                }
+                %persistent bool EhtPhyBeamformeeSs80MhzOrBelow {
+                    default false;
+                }
+                %persistent bool EhtPhyBeamformeeSs160Mhz {
+                    default false;
+                }
+                %persistent bool EhtPhyBeamformeeSs320Mhz {
+                    default false;
+                }
+                %persistent bool EhtPhyEhtDupIn6Ghz {
+                    default false;
+                }
+                %persistent bool EhtPhy20MhzOpStaRxNdpWiderBw {
+                    default false;
+                }
+                %persistent bool EhtPhyNg16SuFeedback {
+                    default false;
+                }
+                %persistent bool EhtPhyNg16MuFeedback {
+                    default false;
+                }
+                %persistent bool EhtPhyCodebookSize42SuFb {
+                    default false;
+                }
+                %persistent bool EhtPhyCodebookSize755MuFb {
+                    default false;
+                }
+                %persistent bool EhtPhyTrigSuBfFb {
+                    default false;
+                }
+                %persistent bool EhtPhyTrigCqiFb {
+                    default false;
+                }
+                %persistent bool EhtPhyPartialBwDlMuMimo {
+                    default false;
+                }
+                %persistent bool EhtPhyPsrBasedSr {
+                    default false;
+                }
+                %persistent bool EhtPhyEhtMuPpdu4xEhtLtf08UsGi {
+                    default false;
+                }
+                %persistent bool EhtPhyRx1024Qam4096QamBel242Ru {
+                    default false;
+                }
+                %persistent bool EhtPhyMaxNumOfSupportedEhtLtfs {
+                    default false;
+                }
+                %persistent bool EhtPhyMcs15 {
+                    default false;
+                }
+                %persistent bool EhtPhyNonOfdmaMuMimo80MhzBelow {
+                    default false;
+                }
+                %persistent bool EhtPhyNonOfdmaUlMuMimoBw160Mhz {
+                    default false;
+                }
+                %persistent bool EhtPhyNonOfdmaUlMuMimoBw320Mhz {
+                    default false;
+                }
+                %persistent bool Rnr6gOpClass137Allowed {
+                    default false;
+                }
+                %persistent uint8 RnrTbttMldNonZeroPad {
+                    default 0;
+                }
+                %persistent int8 SetDynamicMuMinStationsInGroup {
+                    default 4;
+                }
+                %persistent int8 SetDynamicMuMaxStationsInGroup {
+                    default 4;
+                }
+                %persistent int8 SetDynamicMuCdbConfig {
+                    default 0;
+                }
+                %persistent string Country3 {
+                    default "";
                 }
                 /**
                 * HT Capabilites
@@ -242,6 +717,15 @@
                         default "";
                     }
                     /*
+                    *  BG ACS Scan Interval in minutes
+                    *  Valid range: 10 - 1440 minutes 
+                    *  Disable: 0 value.
+                    */
+                    %persistent uint16 AcsBgScanInterval {
+                        on action validate call whm_mxl_rad_validateBgAcsInterval_pvf;
+                        default 0;
+                    }
+                    /*
                     * The below Three parameters are only for
                     * AFC Quicktrack Certification , Should not
                     * be used Independently
@@ -255,6 +739,9 @@
                     %persistent int32 AcsFallbackBW {
                         default 0;
                     }
+                    %persistent bool Acs6gPunctMode {
+                        default false;
+                    }
                 }
                 /*
                 * AFC custom config parameters
@@ -263,31 +750,35 @@
                     on event "*" call whm_mxl_rad_setAfcConf_ocf;
 
                     %persistent string AfcdSock{
-                        default "";
+                        default "/var/run/afcd.sock";
                     }
                     %persistent string AfcOpClass{
-                        default "";
+                        default "131,132,133,134,137";
                      }
                     %persistent string AfcFrequencyRange{
-                        default "";
+                        default "5925:6425,6525:6875";
                      }
                     %persistent string AfcCertIds{
-                        default "";
+                        default "US_47_CFR_PART_15_SUBPART_E:CID000";
                      }
                     %persistent string AfcSerialNumber{
-                        default "";
+                        default "SN000";
                      }
                     %persistent string AfcLinearPolygon{
-                        default "";
+                        default "-121.98586:37.381933";
                      }
                     %persistent int8 AfcLocationType = -1 {
                         on action validate call check_range { min = -1, max = 2 };
+                        default "0";
                      }
                     %persistent string AfcRequestId {
-                        default "";
+                        default "11235813";
                      }
                     %persistent string AfcRequestVersion {
-                        default "";
+                        default "1.4";
+                     }
+                    %persistent string AfcdServerConf {
+                        default "0";
                      }
                 }
                 /*
@@ -382,21 +873,6 @@
                         on action validate call check_range { min = 0, max = 100 };
                     }
                 }
-                /**
-                * ZWDFS debug parameters
-                * Modify desired parameters for ZWDFS radio from 5G radio Vendor object
-                * This object is for QA testing
-                * A change will take affect only after reboot or /etc/init.d/prplmesh_whm stop\start
-                */
-                %persistent object ZwdfsDebug {
-                    /**
-                     * dfs_debug_chan, -1 means it is disabled and won't be written to hostapd conf
-                     * Valid values are DFS_DEBUG_CHAN_MIN to DFS_DEBUG_CHAN_MAX
-                     */
-                    %persistent int32 DfsDebugChan = -1 {
-                        on action validate call whm_mxl_rad_validateDfsDebugChan_pvf;
-                    }
-                }
                 /*
                 * Srart after parameters
                 */
@@ -488,6 +964,16 @@
                     on action validate call whm_mxl_vap_validateNumResSta_pvf;
                     default 0;
                 }
+                %persistent bool SaeExtKey {
+                    default false;
+                }
+                %persistent string GroupMgmtCipher {
+                    default "AES-128-CMAC";
+                }
+                %persistent string RadiusSecretKey {
+                    on action validate call whm_mxl_vap_validateRadiusSecret_pvf;
+                    default "";
+                }
                 %persistent object MultiAp {
                     on event "*" call whm_mxl_vendorMultiAp_setConf_ocf;
 
@@ -533,6 +1019,18 @@
                 */
                 %persistent bool DisableBeaconProtection {
                     default false;
+                }
+
+                /*
+                  Disable PBAC - protected block ack
+                */
+                %persistent bool DisablePbac {
+                    default true;
+                }
+                
+                %persistent int32 MboCellAware {
+                    on action validate call check_range { min = 0, max = 1 };
+                    default 1;
                 }
 
                 %persistent object SoftBlock {
@@ -597,6 +1095,162 @@
                 /*sBridgeMode*/
                 %persistent bool SetBridgeMode {
                     default false;
+                }
+                /*
+                * Configure WPA3 Personal Compatibility Mode
+                * NOTE: This is a hacky method. At the time of implementation
+                *       upstream PWHM does not support this mode. This mode 
+                *       should be deprecated when said functionality is
+                *       available in PWHM.
+                */
+                %persistent bool EnableWPA3PersonalCompatibility {
+                    default false;
+                }
+                /*
+                * The below parameters are required for
+                * Certification configurations
+                */
+                %persistent string SetAggrConfig {
+                    default "";
+                }
+                %persistent uint32 Set11nProtection {
+                    default 0;
+                }
+                %persistent uint32 EmlCapabTransitionTimeout {
+                    default 4;
+                }
+                %persistent bool MldMediumsyncPresent {
+                    default false;
+                }
+                %persistent bool MloT2lmSupport {
+                    default false;
+                }
+                %persistent int8 ApProtectedKeepAliveRequired {
+                    default 0;
+                }
+                %persistent uint8 MldMediumsyncDuration {
+                    default 0;
+                }
+                %persistent uint8 MldMediumsyncOfdmedthresh {
+                    default 0;
+                }
+                %persistent uint8 MldMediumsyncMaxtxop {
+                    default 0;
+                }
+                %persistent bool EhtMacEpcsPrioAccess {
+                    default 0;
+                }
+                %persistent bool RrmNeighRpt {
+                    default 1;
+                }
+                /* Parameter for MBO program Certification */
+                %persistent bool WnmBssTransQueryAutoresp {
+                    default 0;
+                }
+                /* Adding the STA QOS parameters for Certification */
+                %persistent int32 WmmAcVICWMin {
+                    default 3;
+                }
+                %persistent int32 WmmAcVOCWMin {
+                    default 2;
+                }
+                %persistent int32 WmmAcBECWMin {
+                    default 4;
+                }
+                %persistent int32 WmmAcBKCWMin {
+                    default 4;
+                }
+                %persistent int32 WmmAcVICWMax {
+                    default 10;
+                }
+                %persistent int32 WmmAcVOCWMax {
+                    default 9;
+                }
+                %persistent int32 WmmAcBECWMax {
+                    default 10;
+                }
+                %persistent int32 WmmAcBKCWMax {
+                    default 10;
+                }
+                %persistent int32 WmmAcVIAifs {
+                    default 2;
+                }
+                %persistent int32 WmmAcVOAifs {
+                    default 2;
+                }
+                %persistent int32 WmmAcBEAifs {
+                    default 3;
+                }
+                %persistent int32 WmmAcBKAifs {
+                    default 7;
+                }
+                %persistent int32 WmmAcVITXOP {
+                    default 94;
+                }
+                %persistent int32 WmmAcVOTXOP {
+                    default 47;
+                }
+                %persistent int32 WmmAcBETXOP {
+                    default 0;
+                }
+                %persistent int32 WmmAcBKTXOP {
+                    default 0;
+                }
+                %persistent int32 WmmAcVIAcm {
+                    default 0;
+                }
+                %persistent int32 WmmAcVOAcm {
+                    default 0;
+                }
+                %persistent int32 WmmAcBEAcm {
+                    default 0;
+                }
+                %persistent int32 WmmAcBKAcm {
+                    default 0;
+                }
+                /* Adding the AP QOS parameters for Certification */
+                %persistent int32 TxQueueVICWMin {
+                    default 7;
+                }
+                %persistent int32 TxQueueVOCWMin {
+                    default 3;
+                }
+                %persistent int32 TxQueueBECWMin {
+                    default 15;
+                }
+                %persistent int32 TxQueueBKCWMin {
+                    default 15;
+                }
+                %persistent int32 TxQueueVICWMax {
+                    default 15;
+                }
+                %persistent int32 TxQueueVOCWMax {
+                    default 7;
+                }
+                %persistent int32 TxQueueBECWMax {
+                    default 63;
+                }
+                %persistent int32 TxQueueBKCWMax {
+                    default 1023;
+                }
+                %persistent int32 TxQueueVIAifs {
+                    default 1;
+                }
+                %persistent int32 TxQueueVOAifs {
+                    default 1;
+                }
+                %persistent int32 TxQueueBEAifs {
+                    default 3;
+                }
+                %persistent int32 TxQueueBKAifs {
+                    default 7;
+                }
+                %persistent string GroupCipher {
+                    default "CCMP";
+                }
+                %persistent int32 GasCBDelay {
+                    on action validate call check_range { min = 0, max = 5000 };
+                    default 0;
                 }
             }
         }
@@ -675,6 +1329,10 @@
                 %persistent bool CertificationMode {
                     default 0;
                 }
+
+                %persistent bool WPA3CertMode {
+                    default 0;
+                }
             }
             /*
              * Vendor specific daemon configurations management.
@@ -708,6 +1366,25 @@
                         on action validate call check_enum ["Info","Debug","Msgdump","Excessive","Default"];
                         default "Info";
                     }
+                    %persistent bool SupplicantMasterMode {
+                        default false;
+                    }
+                }
+            }
+            /*
+             * Reconf Manager configuration.
+             */
+            %persistent object ReconfManager {
+                on event "*" call whm_mxl_reconfMngr_configure_ocf;
+
+                %persistent bool CommitEnable {
+                    default 1;
+                }
+                %persistent uint32 CommitDelay {
+                    default 1000;
+                }
+                %persistent uint32 BootBlockDelay {
+                    default 10000;
                 }
             }
         }
@@ -721,4 +1398,6 @@
         filter 'path matches "WiFi\.Radio\.[0-9]+\." && (contains("parameters.ObssCoexistenceEnable"))';
     on event "dm:object-changed" call whm_mxl_vap_updateSsidAdvertisement
         filter 'path matches "WiFi\.AccessPoint\.[0-32]+\." && (contains("parameters.SSIDAdvertisementEnabled"))';
+    on event "dm:object-changed" call whm_mxl_vap_updateMaxAssociatedDevices
+        filter 'path matches "WiFi\.AccessPoint\.[0-32]+\." && (contains("parameters.MaxAssociatedDevices"))';
 }

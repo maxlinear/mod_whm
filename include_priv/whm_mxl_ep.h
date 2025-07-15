@@ -14,5 +14,6 @@
 int whm_mxl_epStats(T_EndPoint* pEP, T_EndPointStats* stats);
 swl_rc_ne whm_mxl_ep_enable(T_EndPoint* pEP, bool enable);
 int whm_mxl_ep_createHook(T_EndPoint* pEP);
+int whm_mxl_ep_destroyHook(T_EndPoint* pEP);
 
 #endif /* __WHM_MXL_EP_H__ */

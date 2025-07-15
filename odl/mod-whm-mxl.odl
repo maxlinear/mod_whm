@@ -21,7 +21,10 @@
                        "mxlZwd" = 400,
                        "mxlWmm" = 300,
                        "mxlDmgr" = 300,
-                       "mxlMlo" = 300
+                       "mxlMlo" = 300,
+                       "mxlFsm" = 300,
+                       "mxlRcfM" = 300,
+                       "mxlLck" = 300
                       };
 
 }

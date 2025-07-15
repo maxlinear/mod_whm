@@ -35,6 +35,8 @@
 #include "whm_mxl_supp_cfg.h"
 #include "whm_mxl_parser.h"
 #include "whm_mxl_dmnMngr.h"
+#include "whm_mxl_fsmLocker.h"
+#include "whm_mxl_reconfMngr.h"
 
 #define ME "mxlMod"
 
@@ -42,7 +44,7 @@
 
 static bool s_init = false;
 static vendor_t* s_vendor = NULL;
-static whm_mxl_module_mode_t mxlModule = {.mode = WHM_MXL_MOD_NORMAL};
+static whm_mxl_module_mode_t mxlModule = {.mode = WHM_MXL_MOD_NORMAL, .wpa3CertMode = false};
 
 static const char* s_defaultIfNames[SWL_FREQ_BAND_MAX] = {"wlan0", "wlan2", "wlan4"};
 static const char* s_defaultZwDfsIfName = "wlan6";
@@ -194,11 +196,15 @@ bool whm_mxl_module_init(void) {
     fta.mfn_wrad_sensing_csiStats = whm_mxl_rad_sensingCsiStats;
     fta.mfn_wrad_sensing_resetStats = whm_mxl_rad_sensingResetStats;
     fta.mfn_wrad_updateConfigMap = whm_mxl_rad_updateConfigMap;
+#ifdef CONFIG_VENDOR_MXL_PROPRIETARY
     fta.mfn_wrad_autochannelenable = whm_mxl_rad_autoChannelEnable;
+#endif /* CONFIG_VENDOR_MXL_PROPRIETARY */
     fta.mfn_wrad_setChanspec = whm_mxl_rad_setChanspec;
     fta.mfn_wrad_radio_status = whm_mxl_rad_status;
     fta.mfn_wrad_regdomain = whm_mxl_rad_regDomain;
     fta.mfn_wrad_supstd = whm_mxl_rad_supstd;
+    fta.mfn_wrad_getCurrentTxPow_dBm = whm_mxl_rad_getTxPowerdBm;
+    fta.mfn_wrad_getMaxTxPow_dBm = whm_mxl_rad_getMaxTxPowerdBm;
 
     /* zwdfs fta control */
     fta.mfn_wrad_bgdfs_enable = whm_mxl_rad_bgDfsEnable;
@@ -211,6 +217,7 @@ bool whm_mxl_module_init(void) {
     fta.mfn_wvap_enable = whm_mxl_vap_enable;
     fta.mfn_wvap_ssid = whm_mxl_vap_ssid;
     fta.mfn_wvap_bssid = whm_mxl_vap_bssid;
+    fta.mfn_wvap_sec_sync = whm_mxl_vap_sec_sync;
     fta.mfn_wvap_get_station_stats = whm_mxl_vap_getStationStats;
     fta.mfn_wvap_get_single_station_stats = whm_mxl_vap_getSingleStationStats;
     fta.mfn_wvap_update_ap_stats = whm_mxl_vap_updateApStats;
@@ -220,8 +227,9 @@ bool whm_mxl_module_init(void) {
     fta.mfn_wvap_updated_neighbour = whm_mxl_vap_updated_neighbor;
     fta.mfn_wvap_transfer_sta = whm_mxl_vap_transfer_sta;
 
-    fta.mfn_wendpoint_create_hook = whm_mxl_ep_createHook;
     fta.mfn_wendpoint_enable = whm_mxl_ep_enable;
+    fta.mfn_wendpoint_create_hook = whm_mxl_ep_createHook;
+    fta.mfn_wendpoint_destroy_hook = whm_mxl_ep_destroyHook;
     fta.mfn_wendpoint_stats = whm_mxl_epStats;
     fta.mfn_wendpoint_updateConfigMaps = whm_mxl_ep_updateConfigMaps;
 
@@ -238,6 +246,10 @@ bool whm_mxl_module_init(void) {
 
     /* share the same generic and native fsm manager, of nl80211 wld implementation */
     wld_fsm_init(s_vendor, (wld_fsmMngr_t*) wld_nl80211_getFsmMngr());
+    /* Init generic FSM lock callbacks */
+    whm_mxl_extLocker_init((wld_fsmMngr_t*) wld_nl80211_getFsmMngr());
+    /* Register to event queues */
+    whm_mxl_reconfMngr_initEvents();
 
     /* init done */
     s_init = true;
@@ -274,6 +286,10 @@ whm_mxl_module_mode_e whm_mxl_getModuleMode(void) {
     return mxlModule.mode;
 }
 
+bool whm_mxl_isWpa3CertModeEnabled(void) {
+    return mxlModule.wpa3CertMode;
+}
+
 static void s_setCertMode_pwf(void* priv _UNUSED, 
                               amxd_object_t* object _UNUSED, 
                               amxd_param_t* param _UNUSED, 
@@ -291,8 +307,23 @@ static void s_setCertMode_pwf(void* priv _UNUSED,
     SAH_TRACEZ_OUT(ME);
 }
 
+static void s_setWPA3CertMode_pwf(void* priv _UNUSED,
+                              amxd_object_t* object _UNUSED,
+                              amxd_param_t* param _UNUSED,
+                              const amxc_var_t* const newValue) {
+    SAH_TRACEZ_IN(ME);
+    /* WiFi.Vendor.ModuleMode */
+    bool wpa3Mode = amxc_var_dyncast(bool, newValue);
+    if (wpa3Mode) {
+        mxlModule.wpa3CertMode = true;
+        SAH_TRACEZ_WARNING(ME, "%s: Certification WPA3 mode is set", s_vendor->name);
+    }
+    SAH_TRACEZ_OUT(ME);
+}
+
 SWLA_DM_HDLRS(sModuleModeDmHdlrs,
-              ARR(SWLA_DM_PARAM_HDLR("CertificationMode", s_setCertMode_pwf))
+              ARR(SWLA_DM_PARAM_HDLR("CertificationMode", s_setCertMode_pwf),
+                  SWLA_DM_PARAM_HDLR("WPA3CertMode", s_setWPA3CertMode_pwf))
               );
 
 void _whm_mxl_module_modeObj_ocf(const char* const sig_name,

@@ -42,6 +42,7 @@ int mxl_monitor_setStaScanTimeOut(T_Radio* pRad, uint32_t scanTime);
 
 int whm_mxl_monitor_setupStamon(T_Radio* pRad, bool enable);
 int whm_mxl_monitor_updateMonStats(T_Radio* pRad);
+int whm_mxl_monitor_updateNaStaObj(T_Radio* pRad);
 int whm_mxl_monitor_delStamon(T_Radio* pRad, T_NonAssociatedDevice* pMD);
 
 mxl_nastaEntryData_t* mxl_monitor_fetchRunNaStaEntry(T_Radio* pRad, swl_macBin_t* pStaMac);

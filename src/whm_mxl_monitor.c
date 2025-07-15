@@ -258,6 +258,40 @@ int whm_mxl_monitor_updateMonStats(T_Radio* pRad) {
     return SWL_RC_OK;
 }
 
+int whm_mxl_monitor_updateNaStaObj(T_Radio* pRad){
+
+    ASSERT_NOT_NULL(pRad, SWL_RC_INVALID_PARAM, ME, "NULL");
+
+    amxd_trans_t trans;
+    ASSERT_TRANSACTION_INIT(pRad->pBus, &trans, SWL_RC_ERROR, ME, "%s : trans init failure", pRad->Name);
+
+    amxd_object_t* naStaMonObject = amxd_object_findf(get_wld_object(), "Radio.%u.NaStaMonitor", pRad->ref_index+1);
+    ASSERT_NOT_NULL(naStaMonObject, SWL_RC_ERROR, ME, "No naStaMonObject object found");
+    
+    amxd_object_t* naDevObject = amxd_object_get(naStaMonObject, "NonAssociatedDevice");
+    ASSERT_NOT_NULL(naDevObject, SWL_RC_ERROR, ME, "No naDevObject object found");
+
+    amxd_object_for_each(instance, it, naDevObject) {
+        amxd_object_t* instance = amxc_container_of(it, amxd_object_t, it);
+        if(instance == NULL) {
+            continue;
+        }
+        wld_nasta_t* pMD = (wld_nasta_t*) instance->priv;
+        if(!pMD) {
+            continue;
+        }
+        amxd_trans_select_object(&trans, instance);
+        amxd_trans_set_int32_t(&trans, "SignalStrength", pMD->SignalStrength);
+        amxd_trans_set_uint8_t(&trans, "Channel", pMD->channel);
+        amxd_trans_set_uint8_t(&trans, "OperatingClass", pMD->operatingClass);
+        swl_typeTimeMono_toTransParam(&trans, "TimeStamp", pMD->TimeStamp);
+    }
+
+    ASSERT_TRANSACTION_LOCAL_DM_END(&trans, SWL_RC_ERROR, ME, "%s : trans apply failure", pRad->Name);
+
+    return SWL_RC_OK;
+}
+
 int whm_mxl_monitor_delStamon(T_Radio* pRad, T_NonAssociatedDevice* pMD) {
     ASSERT_NOT_NULL(pMD, SWL_RC_INVALID_PARAM, ME, "NULL");
     mxl_VendorData_t* vendorData = mxl_rad_getVendorData(pRad);

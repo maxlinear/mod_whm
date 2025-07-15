@@ -34,8 +34,10 @@ static swl_rc_ne s_whm_mxl_ep_updateGlobalConfig(T_EndPoint* pEP, wld_wpaSupp_co
     char* vendorElems       = amxd_object_get_value(cstring_t, pEpVendorObj, "VendorElements", NULL);
 
     if(!(swl_str_isEmpty(vendorElems))) {
-        swl_mapChar_add(global, "vendor_elems", vendorElems);
+        swl_mapCharFmt_addValStr(global, "vendor_elements", "%s", vendorElems);
     }
+    free(vendorElems);
+
     MXL_EP_CHECK_GT_SET_NEW_PARAM(wds, 0, global, "wds");
     MXL_EP_CHECK_GT_SET_NEW_PARAM(wpsCredAddSae, 0, global, "wps_cred_add_sae");
 

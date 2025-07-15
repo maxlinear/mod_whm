@@ -39,6 +39,8 @@
 #define OBSS_INTERVAL_MAX                 900
 #define DFS_DEBUG_CHAN_MIN                32
 #define DFS_DEBUG_CHAN_MAX                196
+#define ZWDFS_DEBUG_CHAN_MIN              32
+#define ZWDFS_DEBUG_CHAN_MAX              196
 #define BSS_COLOR_CHANGE_TIMEOUT_MIN      1
 #define BSS_COLOR_CHANGE_TIMEOUT_MAX      120
 #define BSS_COLOR_CHANGE_TIMEOUT_RANDOM   255
@@ -108,6 +110,15 @@
         if(refParamVal != val) { \
             swl_mapCharFmt_addValStr(configMap, confName, "%d", refParamVal); \
         } \
+    }
+
+#define WHM_MXL_GET_AND_SET_STRING_PARAM(tmpStr, obj, paramName, configMap, confName) \
+    { \
+        tmpStr = amxd_object_get_value(cstring_t, obj, paramName, NULL); \
+        if (!swl_str_isEmpty(tmpStr)) { \
+            swl_mapCharFmt_addValStr(configMap, confName, "%s", tmpStr); \
+        } \
+        free(tmpStr); \
     }
 
 /* Function Declarations Section */

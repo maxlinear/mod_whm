@@ -17,8 +17,10 @@
 
 #define WPASUPP_CONF_FILE_PATH_FORMAT "/tmp/%s_wpa_supplicant.conf"
 #define WPASUPP_DEFAULT_START_ARGS "-ddK"
-#define WPASUPP_ARGS_FORMAT_EXT " -b%s -i%s -Dnl80211 -c%s"
-#define WPASUPP_ARGS_FORMAT " -i%s -Dnl80211 -c%s"
+#define WPASUPP_ARGS_CERT_FORMAT_EXT " -b%s -i%s -Dnl80211 -c%s"
+#define WPASUPP_ARGS_CERT_FORMAT " -i%s -Dnl80211 -c%s"
+#define WPASUPP_ARGS_STA_FORMAT_EXT " -b%s -i%s -Dnl80211 -c%s -F -H /var/run/hostapd/%s"
+#define WPASUPP_ARGS_STA_FORMAT " -i%s -Dnl80211 -c%s -F -H /var/run/hostapd/%s"
 #define MXL_WPASUPPLICANT "wpa_supplicant"
 
 enum {
@@ -46,6 +48,7 @@ typedef enum {
 typedef struct {
     swl_enum_e logOutputPath;   //indicates wheter deamon outputs log messages to syslog or stdout: {Stdout, Syslog}
     swl_enum_e logDebugLevel;   //set daemon output log level: {Info, Debug, Msgdump, Excessive, Default}
+    bool wpaSupplicantMasterMode; //set wpa_supplicant master mode: {true, false}
 } mxl_dmnMngrExecSettings;
 
 typedef struct mxl_dmnMngrCtx {
@@ -63,8 +66,8 @@ mxl_secDmn_state_t whm_mxl_dmnMngr_getDmnCtxState(mxl_dmnMngrCtx_t* pDmnCtx);
 void whm_mxl_dmnMngr_setDmnCtxGlbHpd(mxl_dmnMngrCtx_t* pDmnCtx , bool set);
 bool whm_mxl_dmnMngr_isDmnCtxGlbHpd(mxl_dmnMngrCtx_t* pDmnCtx);
 swl_rc_ne whm_mxl_dmnMngr_setDmnExecSettings(vendor_t* pVdr, const char* dmnName, wld_dmnMgt_dmnExecSettings_t* pCfg);
-swl_rc_ne whm_mxl_dmnMngr_updateDmnArgs(T_EndPoint* pEP, bool enable);
 void whm_mxl_setSecDmnStartingArgs(T_Radio* pRad);
 bool whm_mxl_dmnMngr_isGlbHapdEnabled();
+swl_rc_ne whm_mxl_dmnMngr_setWpaSuppArgsHanlder(T_EndPoint* pEP);
 
 #endif /* __WHM_MXL_DMN_MNGR_H__ */

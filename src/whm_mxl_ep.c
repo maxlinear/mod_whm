@@ -27,7 +27,6 @@
 
 #include "whm_mxl_utils.h"
 #include "whm_mxl_ep.h"
-#include "whm_mxl_evt.h"
 #include "whm_mxl_cfgActions.h"
 #include "whm_mxl_dmnMngr.h"
 
@@ -174,11 +173,19 @@ int whm_mxl_ep_createHook(T_EndPoint* pEP) {
     swl_rc_ne rc;
     CALL_NL80211_FTA_RET(rc, mfn_wendpoint_create_hook, pEP);
     ASSERT_FALSE(rc < SWL_RC_OK, rc, ME, "fail in generic call");
+    // register wpa_supplicant secDmn custom handlers
+    return whm_mxl_dmnMngr_setWpaSuppArgsHanlder(pEP);
+}
 
-    // set vendor events handler
-    SAH_TRACEZ_INFO(ME, "%s: Set vendor event handler", pEP->Name);
-    rc = mxl_evt_setVendorEvtHandlers_Ep(pEP);
-
+int whm_mxl_ep_destroyHook(T_EndPoint* pEP) {
+    ASSERT_NOT_NULL(pEP, SWL_RC_INVALID_PARAM, ME, "NULL");
+    swl_rc_ne rc;
+    CALL_NL80211_FTA_RET(rc, mfn_wendpoint_destroy_hook, pEP);
+    ASSERT_FALSE(rc < SWL_RC_OK, rc, ME, "fail in generic call");
+    mxl_dmnMngrCtx_t* pDmnCtx = whm_mxl_dmnMngr_getDmnCtx(MXL_WPASUPPLICANT);
+    ASSERT_NOT_NULL(pDmnCtx, SWL_RC_INVALID_PARAM, ME, "pDmnCtx is NULL");
+    pDmnCtx->initPending = true;
+    whm_mxl_dmnMngr_setDmnCtxState(pDmnCtx, MXL_SECDMN_STATE_RST);
     return rc;
 }
 
@@ -186,8 +193,7 @@ swl_rc_ne whm_mxl_ep_enable(T_EndPoint* pEP, bool enable) {
     ASSERT_NOT_NULL(pEP, SWL_RC_INVALID_PARAM, ME, "pEP is NULL");
     swl_rc_ne rc;
     CALL_NL80211_FTA_RET(rc, mfn_wendpoint_enable, pEP, enable);
-
-    whm_mxl_dmnMngr_updateDmnArgs(pEP, enable);
+    ASSERT_FALSE(rc < SWL_RC_OK, rc, ME, "fail in generic call");
     return rc;
 }
 

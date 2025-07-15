@@ -27,12 +27,15 @@
 #include "wld/wld_linuxIfUtils.h"
 #include "wld/wld_rad_nl80211.h"
 #include "wld/wld_linuxIfUtils.h"
+#include "wld/wld_wpaCtrlMngr.h"
+#include "wld/wld_wpaCtrl_api.h"
 #include "swl/swl_common.h"
 
 #include "whm_mxl_cfgActions.h"
 #include "whm_mxl_rad.h"
 #include "whm_mxl_dmnMngr.h"
 #include "whm_mxl_utils.h"
+#include "whm_mxl_reconfMngr.h"
 
 #define ME "mxlRadI"
 #define MXL_VAP_DELETE_TIMER_RETRIES 40
@@ -176,6 +179,19 @@ int whm_mxl_rad_delVapIf(T_Radio* pRad, char* vapName) {
     return SWL_RC_OK;
 }
 
+void whm_mxl_dynamicAddVapSync(T_Radio* pRad, T_AccessPoint* pAP) {
+    ASSERT_NOT_NULL(pRad, , ME, "NULL");
+    ASSERT_NOT_NULL(pAP, , ME, "NULL");
+    ASSERTI_TRUE(wld_secDmn_isRunning(pRad->hostapd), , ME, "%s: hostapd is not running", pRad->Name);
+    ASSERTI_TRUE(whm_mxl_dmnMngr_isGlbHapdEnabled(), , ME, "%s: not single hostapd", pRad->Name);
+    mxl_VendorData_t* pRadVendor = mxl_rad_getVendorData(pRad);
+    ASSERTI_NOT_NULL(pRadVendor, , ME, "pRadVendor is NULL");
+
+    SAH_TRACEZ_INFO(ME, "New vap %s dynamically created - scheduling sync", pAP->alias);
+    whm_mxl_rad_setCtrlSockSyncNeeded(pRad, true);
+    whm_mxl_rad_requestSync(pRad);
+}
+
 int whm_mxl_rad_addEndpointIf(T_Radio* pRad, char* buf, int bufsize) {
     ASSERT_NOT_NULL(pRad, SWL_RC_INVALID_PARAM, ME, "NULL");
     ASSERT_NOT_NULL(buf, SWL_RC_INVALID_PARAM, ME, "NULL");
@@ -294,5 +310,47 @@ swl_rc_ne whm_mxl_vap_delWdsIfaceEvent(T_AccessPoint* pAP, wld_wds_intf_t* wdsIn
     ASSERT_NOT_NULL(wdsIntf, SWL_RC_INVALID_PARAM, ME, "wdsIntf is NULL");
     SAH_TRACEZ_NOTICE(ME, "%s: wds iface %s deleted", pAP->alias, wdsIntf->name);
     /* No specific handling for the moment */
+    return SWL_RC_OK;
+}
+
+static wld_wpaCtrlInterface_t* s_getMainIface(T_Radio* pRad) {
+    ASSERTS_NOT_NULL(pRad, NULL, ME, "NULL");
+    ASSERTS_NOT_NULL(pRad->hostapd, NULL, ME, "NULL");
+    return wld_wpaCtrlMngr_getFirstReadyInterface(pRad->hostapd->wpaCtrlMngr);
+}
+
+SWL_TABLE(sHapdStatesMaps,
+          ARR(char* hapdStateStr; chanmgt_rad_state radDetState; ),
+          ARR(swl_type_charPtr, swl_type_uint32, ),
+          ARR({"UNKNOWN", CM_RAD_UNKNOWN},
+              {"UNINITIALIZED", CM_RAD_ERROR},
+              {"DISABLED", CM_RAD_DOWN},
+              {"COUNTRY_UPDATE", CM_RAD_CONFIGURING},
+              {"ACS", CM_RAD_CONFIGURING},
+#ifdef CONFIG_VENDOR_MXL_PROPRIETARY
+              {"ACS_DONE", CM_RAD_CONFIGURING},
+#endif /* CONFIG_VENDOR_MXL_PROPRIETARY */
+              {"HT_SCAN", CM_RAD_CONFIGURING},
+              {"DFS", CM_RAD_FG_CAC},
+              {"ENABLED", CM_RAD_UP},
+              ));
+
+swl_rc_ne whm_mxl_hapd_getRadState(T_Radio* pRad, chanmgt_rad_state* pDetailedState) {
+    ASSERTS_NOT_NULL(pRad, SWL_RC_INVALID_PARAM, ME, "NULL");
+    wld_wpaCtrlInterface_t* mainIface = s_getMainIface(pRad);
+    ASSERTS_NOT_NULL(mainIface, SWL_RC_ERROR, ME, "%s: No main hapd wpactrl iface", pRad->Name);
+    ASSERTI_TRUE(wld_wpaCtrlInterface_isReady(mainIface), SWL_RC_ERROR,
+                 ME, "%s: main wpactrl iface is not ready", pRad->Name);
+    char reply[1024] = {0};
+    char state[64] = {0};
+    if((!wld_wpaCtrl_sendCmdSynced(mainIface, "STATUS", reply, sizeof(reply) - 1)) ||
+       (wld_wpaCtrl_getValueStr(reply, "state", state, sizeof(state)) <= 0)) {
+        SAH_TRACEZ_INFO(ME, "%s: status not yet available", pRad->Name);
+        return SWL_RC_ERROR;
+    }
+    chanmgt_rad_state* pRadDetState = (chanmgt_rad_state*) swl_table_getMatchingValue(&sHapdStatesMaps, 1, 0, state);
+    ASSERTI_NOT_NULL(pRadDetState, SWL_RC_ERROR, ME, "%s: unknown hapd state(%s)", pRad->Name, state);
+    W_SWL_SETPTR(pDetailedState, *pRadDetState);
+    SAH_TRACEZ_INFO(ME, "%s: hapd state[%s] -> radDetState[%d]", pRad->Name, state, *pRadDetState);
     return SWL_RC_OK;
 }

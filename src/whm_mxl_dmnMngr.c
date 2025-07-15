@@ -147,6 +147,20 @@ static void s_setHapdDmnStartArgs(vendor_t* pVdr) {
     whm_mxl_dmnMngr_setDmnCtxState(pDmnCtx, MXL_SECDMN_STATE_READY);
 }
 
+static void s_whm_mxl_restartAllSupplicants() {
+    T_Radio* pRad;
+    T_EndPoint* pEP;
+    wld_for_eachRad(pRad) {
+        if (pRad) {
+            wld_rad_forEachEp(pEP, pRad) {
+                if (pEP && pEP->enable) {
+                    wld_secDmn_restart(pEP->wpaSupp);
+                }
+            }
+        }
+    }
+}
+
 swl_rc_ne whm_mxl_dmnMngr_setDmnExecSettings(vendor_t* pVdr, const char* dmnName, wld_dmnMgt_dmnExecSettings_t* pCfg) {
     ASSERT_NOT_NULL(pVdr, SWL_RC_INVALID_PARAM, ME, "NULL");
     ASSERT_STR(dmnName, SWL_RC_INVALID_PARAM, ME, "Empty");
@@ -162,6 +176,7 @@ static void s_setDmnCtxDefaults(mxl_dmnMngrCtx_t* pDmnCtx) {
     pDmnCtx->initPending = true;
     pDmnCtx->dmnExecutionSettings.logOutputPath = DMN_OUTPUT_STDOUT;
     pDmnCtx->dmnExecutionSettings.logDebugLevel = DMN_DEBUG_LEVEL_MSGDUMP;
+    pDmnCtx->dmnExecutionSettings.wpaSupplicantMasterMode = false;
 }
 
 static void s_addDmnInst_oaf(void* priv _UNUSED, amxd_object_t* object, const amxc_var_t* const initialParamValues _UNUSED) {
@@ -227,9 +242,11 @@ static void s_setDmnExecOptsObj_ocf(void* priv _UNUSED, amxd_object_t* object, c
     ASSERT_NOT_NULL(pDmnObj, , ME, "pDmnObj is NULL");
     mxl_dmnMngrCtx_t* pDmnCtx = (mxl_dmnMngrCtx_t*) pDmnObj->priv;
     ASSERT_NOT_NULL(pDmnCtx, , ME, "pDmnCtx is NULL");
+    bool suppMasterModeChanged = false;
 
     amxc_var_for_each(newValue, newParamValues) {
         char* valStr = NULL;
+        bool newVal = false;
         const char* pname = amxc_var_key(newValue);
         if(swl_str_matches(pname, "LogOutputPath")) {
             valStr = amxc_var_dyncast(cstring_t, newValue);
@@ -237,6 +254,12 @@ static void s_setDmnExecOptsObj_ocf(void* priv _UNUSED, amxd_object_t* object, c
         } else if(swl_str_matches(pname, "LogDebugLevel")) {
             valStr = amxc_var_dyncast(cstring_t, newValue);
             pDmnCtx->dmnExecutionSettings.logDebugLevel = swl_conv_charToEnum(valStr, cstr_DMN_DEBUG_LEVEL, DMN_DEBUG_LEVEL_MAX, DMN_DEBUG_LEVEL_DEFAULT);
+        } else if(swl_str_matches(pDmnCtx->name, MXL_WPASUPPLICANT) && swl_str_matches(pname, "SupplicantMasterMode")) {
+            newVal = amxc_var_dyncast(bool, newValue);
+            if (pDmnCtx->dmnExecutionSettings.wpaSupplicantMasterMode != newVal) {
+                pDmnCtx->dmnExecutionSettings.wpaSupplicantMasterMode = newVal;
+                suppMasterModeChanged = true;
+            }
         } else {
             continue;
         }
@@ -244,10 +267,11 @@ static void s_setDmnExecOptsObj_ocf(void* priv _UNUSED, amxd_object_t* object, c
 
     }
 
-    SAH_TRACEZ_INFO(ME, "Dmn execution options set for dmn:%s logOutputPath=%d, logDebugLevel=%d",
+    SAH_TRACEZ_INFO(ME, "Dmn execution options set for dmn:%s logOutputPath=%d, logDebugLevel=%d, wpaSupplicantMasterMode=%d",
                                                         pDmnCtx->name,
                                                         pDmnCtx->dmnExecutionSettings.logOutputPath,
-                                                        pDmnCtx->dmnExecutionSettings.logDebugLevel);
+                                                        pDmnCtx->dmnExecutionSettings.logDebugLevel,
+                                                        pDmnCtx->dmnExecutionSettings.wpaSupplicantMasterMode);
 
     vendor_t* pVendor = wld_getVendorByName(MXL_VENDOR_NAME);
     ASSERT_NOT_NULL(pVendor, , ME, "pVendor is NULL");
@@ -269,7 +293,10 @@ static void s_setDmnExecOptsObj_ocf(void* priv _UNUSED, amxd_object_t* object, c
             }
             whm_mxl_restartAllRadios();
         } else if (swl_str_matches(pDmnCtx->name, MXL_WPASUPPLICANT)) {
-            /* NEED TO IMPLEMENT UPDATING SUPPLICANT ARGS */
+            if (suppMasterModeChanged) {
+                /* restart all wpa_supplicants when Supplicant Master Mode is changed */
+                s_whm_mxl_restartAllSupplicants();
+            }
         }
     }
     SAH_TRACEZ_OUT(ME);
@@ -351,45 +378,59 @@ swl_rc_ne s_writeWpaSuppArgsToBuf(char* args, size_t argsSize, char* confFilePat
     swl_str_copy(args, argsSize, "\0");
     ret = s_initWpaSuppStartingArgs(args);
     ASSERTI_TRUE(ret, SWL_RC_ERROR, ME, "%s: writing wpa supplicant args error", pEP->Name);
-    if(!swl_str_isEmpty(pEP->bridgeName)) {
-        ret = swl_str_catFormat(args, argsSize, WPASUPP_ARGS_FORMAT_EXT, pEP->bridgeName, pEP->Name, cfgPath);
+    mxl_dmnMngrCtx_t* pDmnCtx = whm_mxl_dmnMngr_getDmnCtx(MXL_WPASUPPLICANT);
+
+    if (pDmnCtx->dmnExecutionSettings.wpaSupplicantMasterMode) {
+        if(!swl_str_isEmpty(pEP->bridgeName)) {
+            ret = swl_str_catFormat(args, argsSize, WPASUPP_ARGS_STA_FORMAT_EXT, pEP->bridgeName, pEP->Name, cfgPath, pEP->pRadio->Name);
+        } else {
+            ret = swl_str_catFormat(args, argsSize, WPASUPP_ARGS_STA_FORMAT, pEP->Name, cfgPath, pEP->pRadio->Name);
+        }
     } else {
-        ret = swl_str_catFormat(args, argsSize, WPASUPP_ARGS_FORMAT, pEP->Name, cfgPath);
+        if(!swl_str_isEmpty(pEP->bridgeName)) {
+            ret = swl_str_catFormat(args, argsSize, WPASUPP_ARGS_CERT_FORMAT_EXT, pEP->bridgeName, pEP->Name, cfgPath);
+        } else {
+            ret = swl_str_catFormat(args, argsSize, WPASUPP_ARGS_CERT_FORMAT, pEP->Name, cfgPath);
+        }
     }
     ASSERTI_TRUE(ret, SWL_RC_ERROR, ME, "%s: writing wpaArgs error", pEP->Name);
     return SWL_RC_OK;
 }
 
-static swl_rc_ne s_setWpaSuppArgs(T_EndPoint* pEP) {
-    ASSERT_NOT_NULL(pEP, SWL_RC_ERROR, ME, "pEP is NULL");
+static char* s_getWpaSupArgsCb(wld_secDmn_t* pSecDmn, void* userdata _UNUSED) {
+    ASSERT_NOT_NULL(pSecDmn, NULL, ME, "NULL");
+    T_EndPoint* pEP = (T_EndPoint*) userdata;
+    ASSERT_NOT_NULL(pEP, NULL, ME, "NULL");
+
     char startArgs[128] = {0};
     char confFilePath[128] = {0};
-    swl_rc_ne rc = s_writeWpaSuppArgsToBuf(startArgs, sizeof(startArgs), confFilePath, sizeof(confFilePath), pEP);
-    ASSERT_NOT_NULL(pEP->wpaSupp, SWL_RC_ERROR, ME, "%s: wpaSupp not initalized yet", pEP->Name);
-    ASSERT_NOT_NULL(pEP->wpaSupp->dmnProcess, SWL_RC_ERROR, ME, "wpa_supplicant dmn process is NULL");
-    SAH_TRACEZ_INFO(ME, "%s: WPA SUPPLICANT: startingArgs=%s", pEP->Name, startArgs);
-    wld_dmn_setArgList(pEP->wpaSupp->dmnProcess, startArgs);
-    return rc;
+    s_writeWpaSuppArgsToBuf(startArgs, sizeof(startArgs), confFilePath, sizeof(confFilePath), pEP);
+
+    char* args = NULL;
+    swl_str_copyMalloc(&args, startArgs);
+    SAH_TRACEZ_INFO(ME, "%s: WPA SUPPLICANT: args=%s", pEP->Name, args);
+    return args;
 }
 
-swl_rc_ne whm_mxl_dmnMngr_updateDmnArgs(T_EndPoint* pEP, bool enable) {
-    swl_rc_ne rc;
-    ASSERT_NOT_NULL(pEP, SWL_RC_INVALID_PARAM, ME, "pEP is NULL");
+swl_rc_ne whm_mxl_dmnMngr_setWpaSuppArgsHanlder(T_EndPoint* pEP) {
+    ASSERT_NOT_NULL(pEP, SWL_RC_INVALID_PARAM, ME, "NULL");
+    ASSERT_NOT_NULL(pEP->wpaSupp, SWL_RC_INVALID_PARAM, ME, "NULL");
     mxl_dmnMngrCtx_t* pDmnCtx = whm_mxl_dmnMngr_getDmnCtx(MXL_WPASUPPLICANT);
     ASSERT_NOT_NULL(pDmnCtx, SWL_RC_INVALID_PARAM, ME, "pDmnCtx is NULL");
-    if (enable) {
-        /* Implementaiton ready but doesnt really work yet until wld_dmn_setArgList
-         * call is removed from wifiGen_wpaSupp_startDaemon, it wont modify any starting
-         * arguments since its the last call before daemon is really starting.
-         */
-        rc = s_setWpaSuppArgs(pEP);
-        if (rc == SWL_RC_OK) {
-            whm_mxl_dmnMngr_setDmnCtxState(pDmnCtx, MXL_SECDMN_STATE_READY);
-        }
+
+    wld_secDmnEvtHandlers handlers = pEP->wpaSupp->handlers;
+    //change getArg handlers, to provide custom startArgs just before starting wpa_supplicant
+    handlers.getArgs = s_getWpaSupArgsCb;
+    if (wld_secDmn_setEvtHandlers(pEP->wpaSupp, &handlers, pEP) == SWL_RC_OK) {
+        pDmnCtx->initPending = false;
+        whm_mxl_dmnMngr_setDmnCtxState(pDmnCtx, MXL_SECDMN_STATE_READY);
+        return SWL_RC_OK;
     } else {
+        SAH_TRACEZ_ERROR(ME, "Fail to set wpa_supplicant custom handlers");
+        pDmnCtx->initPending = true;
         whm_mxl_dmnMngr_setDmnCtxState(pDmnCtx, MXL_SECDMN_STATE_RST);
+        return SWL_RC_ERROR;
     }
-    return SWL_RC_OK;
 }
 
 bool whm_mxl_dmnMngr_isGlbHapdEnabled() {

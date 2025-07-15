@@ -12,6 +12,7 @@
                     object ExecOptions {
                         parameter LogOutputPath = "Stdout";
                         parameter LogDebugLevel = "Info";
+                        parameter SupplicantMasterMode = false;
                     }
                 }
             }

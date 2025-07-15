@@ -1,7 +1,7 @@
 %populate {
     object WiFi {
         object AutoNeighbourAddition {
-            parameter Enable = 1;
+            parameter Enable = 0;
         }
         object DaemonMgt.Daemon {
             object 'hostapd' {

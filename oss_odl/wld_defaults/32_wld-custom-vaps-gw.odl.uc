@@ -3,9 +3,17 @@
         object AccessPoint {
 {% for ( let Itf in BD.Interfaces ) : if ( BDfn.isInterfaceWirelessAp(Itf.Name) ) : %}
             object '{{Itf.Alias}}' {
+{% if ( Itf.SSIDEnable == "false" ) : %}
+                parameter Enable = false;
+{% else %}
                 parameter Enable = true;
+{% endif %}
                 parameter MBOEnable = true;
+{% if ( Itf.isBackhaul == "true" ) : %}
+                parameter MultiAPType = "BackhaulBSS";
+{% else %}
                 parameter MultiAPType = "FronthaulBSS";
+{% endif %}
                 parameter UAPSDEnable = true;
                 object IEEE80211u {
                     parameter InterworkingEnable = 1;

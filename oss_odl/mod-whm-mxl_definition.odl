@@ -214,31 +214,35 @@
                     on event "*" call whm_mxl_rad_setAfcConf_ocf;
 
                     %persistent string AfcdSock{
-                        default "";
+                        default "/var/run/afcd.sock";
                     }
                     %persistent string AfcOpClass{
-                        default "";
+                        default "131,132,133,134,137";
                      }
                     %persistent string AfcFrequencyRange{
-                        default "";
+                        default "5925:6425,6525:6875";
                      }
                     %persistent string AfcCertIds{
-                        default "";
+                        default "US_47_CFR_PART_15_SUBPART_E:CID000";
                      }
                     %persistent string AfcSerialNumber{
-                        default "";
+                        default "SN000";
                      }
                     %persistent string AfcLinearPolygon{
-                        default "";
+                        default "-121.98586:37.381933";
                      }
                     %persistent int8 AfcLocationType = -1 {
                         on action validate call check_range { min = -1, max = 2 };
+                        default "0";
                      }
                     %persistent string AfcRequestId {
-                        default "";
+                        default "11235813";
                      }
                     %persistent string AfcRequestVersion {
-                        default "";
+                        default "1.4";
+                     }
+                    %persistent string AfcdServerConf {
+                        default "0";
                      }
                 }
                 /*
@@ -424,6 +428,12 @@
                     on action validate call whm_mxl_vap_validateNumResSta_pvf;
                     default 0;
                 }
+                %persistent bool SaeExtKey {
+                    default false;
+                }
+                %persistent string GroupMgmtCipher {
+                    default "AES-128-CMAC";
+                }
                 %persistent object MultiAp {
                     on event "*" call whm_mxl_vendorMultiAp_setConf_ocf;
 
@@ -469,6 +479,18 @@
                 */
                 %persistent bool DisableBeaconProtection {
                     default false;
+                }
+
+                /*
+                  Disable PBAC - protected block ack
+                */
+                %persistent bool DisablePbac {
+                    default true;
+                }
+
+                %persistent int32 MboCellAware {
+                    on action validate call check_range { min = 0, max = 1 };
+                    default 1;
                 }
 
                 %persistent object SoftBlock {
@@ -532,6 +554,16 @@
                 }
                 /*sBridgeMode*/
                 %persistent bool SetBridgeMode {
+                    default false;
+                }
+                /*
+                * Configure WPA3 Personal Compatibility Mode
+                * NOTE: This is a hacky method. At the time of implementation
+                *       upstream PWHM does not support this mode. This mode
+                *       should be deprecated when said functionality is
+                *       available in PWHM.
+                */
+                %persistent bool EnableWPA3PersonalCompatibility {
                     default false;
                 }
             }
@@ -644,6 +676,25 @@
                         on action validate call check_enum ["Info","Debug","Msgdump","Excessive","Default"];
                         default "Info";
                     }
+                    %persistent bool SupplicantMasterMode {
+                        default false;
+                    }
+                }
+            }
+            /*
+             * Reconf Manager configuration.
+             */
+            %persistent object ReconfManager {
+                on event "*" call whm_mxl_reconfMngr_configure_ocf;
+
+                %persistent bool CommitEnable {
+                    default 1;
+                }
+                %persistent uint32 CommitDelay {
+                    default 1000;
+                }
+                %persistent uint32 BootBlockDelay {
+                    default 10000;
                 }
             }
         }
@@ -657,4 +708,6 @@
         filter 'path matches "WiFi\.Radio\.[0-9]+\." && (contains("parameters.ObssCoexistenceEnable"))';
     on event "dm:object-changed" call whm_mxl_vap_updateSsidAdvertisement
         filter 'path matches "WiFi\.AccessPoint\.[0-32]+\." && (contains("parameters.SSIDAdvertisementEnabled"))';
+    on event "dm:object-changed" call whm_mxl_vap_updateMaxAssociatedDevices
+        filter 'path matches "WiFi\.AccessPoint\.[0-32]+\." && (contains("parameters.MaxAssociatedDevices"))';
 }
