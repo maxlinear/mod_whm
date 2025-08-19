@@ -379,6 +379,7 @@ swl_rc_ne s_writeWpaSuppArgsToBuf(char* args, size_t argsSize, char* confFilePat
     ret = s_initWpaSuppStartingArgs(args);
     ASSERTI_TRUE(ret, SWL_RC_ERROR, ME, "%s: writing wpa supplicant args error", pEP->Name);
     mxl_dmnMngrCtx_t* pDmnCtx = whm_mxl_dmnMngr_getDmnCtx(MXL_WPASUPPLICANT);
+    ASSERT_NOT_NULL(pDmnCtx, SWL_RC_ERROR, ME, "pDmnCtx is NULL");
 
     if (pDmnCtx->dmnExecutionSettings.wpaSupplicantMasterMode) {
         if(!swl_str_isEmpty(pEP->bridgeName)) {

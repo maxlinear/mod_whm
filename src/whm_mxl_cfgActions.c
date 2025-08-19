@@ -179,7 +179,7 @@ SWL_TABLE(sVendorParamsOdlToConf,
               {"HeMcsNssTxHeMcsMap160Mhz",      "he_mcs_nss_tx_he_mcs_map_160_mhz"},
               {"VhtMcsSetPart0",                "vht_mcs_set_part0"},
               {"VhtMcsSetPart1",                "vht_mcs_set_part1"},
-              {"HePhyMacNc",                    "he_phy_max_nc"},
+              {"HePhyMaxNc",                    "he_phy_max_nc"},
               {"SrCtrlHesigaSpatialReuseVal15", "sr_control_field_hesiga_spatial_reuse_value15_allowed"},
               {"HeOperationCohostedBss",        "he_operation_cohosted_bss"},
               {"HeMuEdcaIePresent",             "he_mu_edca_ie_present"},
@@ -197,7 +197,7 @@ SWL_TABLE(sVendorParamsOdlToConf,
               {"HeMuEdcaAcBkAci",               "he_mu_edca_ac_bk_aci"},
               {"HeMuEdcaAcBeEcwmin",            "he_mu_edca_ac_bk_ecwmin"},
               {"HeMuEdcaAcBeEcwmax",            "he_mu_edca_ac_bk_ecwmax"},
-              {"HeMuEdcaAcBeTimer",             "he_mu_edca_ac_bk_timer"},
+              {"HeMuEdcaAcBkTimer",             "he_mu_edca_ac_bk_timer"},
               {"HeMuEdcaAcViEcwmin",            "he_mu_edca_ac_vi_ecwmin"},
               {"HeMuEdcaAcViEcwmax",            "he_mu_edca_ac_vi_ecwmax"},
               {"HeMuEdcaAcViAifsn",             "he_mu_edca_ac_vi_aifsn"},
@@ -350,6 +350,7 @@ SWL_TABLE(sVendorParamsOdlToConf,
               {"DisableBeaconProtection",       "disable_beacon_prot"},
               {"DisablePbac",                   "disable_pbac"},
               {"SetBridgeMode",                 "sBridgeMode"},
+              {"EnableBssLoad",                 "enable_bss_load_ie"},
               {"MboCellAware",                  "mbo_cell_aware"},
               {"SetAggrConfig",                 "sAggrConfig"},
               {"Set11nProtection",              "s11nProtection"},
@@ -398,6 +399,8 @@ SWL_TABLE(sVendorParamsOdlToConf,
               {"TxQueueBKAifs",                 "tx_queue_data3_aifs"},
               {"GroupCipher",                   "group_cipher"},
               {"GasCBDelay",                    "gas_comeback_delay"},
+              {"SCSEnable",                     "scs_enable"},
+              {"Ignore11vDiassoc",              "ignore_da_timer"},
               ));
 
 SWL_TABLE(sRadCfgParamsActionMap,
@@ -476,7 +479,7 @@ SWL_TABLE(sRadCfgParamsActionMap,
               {"HeMcsNssTxHeMcsMap160Mhz",      HAPD_ACTION_NEED_TOGGLE},
               {"VhtMcsSetPart0",                HAPD_ACTION_NEED_TOGGLE},
               {"VhtMcsSetPart1",                HAPD_ACTION_NEED_TOGGLE},
-              {"HePhyMacNc",                    HAPD_ACTION_NEED_TOGGLE},
+              {"HePhyMaxNc",                    HAPD_ACTION_NEED_TOGGLE},
               {"SrCtrlHesigaSpatialReuseVal15", HAPD_ACTION_NEED_TOGGLE},
               {"HeOperationCohostedBss",        HAPD_ACTION_NEED_TOGGLE},
               {"HeMuEdcaIePresent",             HAPD_ACTION_NEED_TOGGLE},
@@ -741,6 +744,7 @@ SWL_TABLE(sVapCfgParamsActionMap,
               {"TxQueueBEAifs",                 HAPD_ACTION_NEED_TOGGLE},
               {"TxQueueBKAifs",                 HAPD_ACTION_NEED_TOGGLE},
               {"GasCBDelay",                    HAPD_ACTION_NEED_TOGGLE},
+              {"SCSEnable",                     HAPD_ACTION_NEED_TOGGLE},
               //Actions applied with sighup to hostpad
               {"RadiusSecretKey",               HAPD_ACTION_NEED_SIGHUP},
               {"OWETransitionBSSID",            HAPD_ACTION_NEED_SIGHUP},
@@ -753,8 +757,10 @@ SWL_TABLE(sVapCfgParamsActionMap,
               //Actions applied with update beacon
               {"BssTransition",                 HAPD_ACTION_NEED_UPDATE_BEACON},
               {"ApMaxInactivity",               HAPD_ACTION_NEED_UPDATE_BEACON},
+              {"EnableBssLoad",                 HAPD_ACTION_NEED_UPDATE_BEACON},
               //Action applied with update hostapd conf
               {"MgmtFramePowerControl",         HAPD_ACTION_NEED_UPDATE_CONF},
+              {"Ignore11vDiassoc",              HAPD_ACTION_NEED_UPDATE_CONF},
               //Action applied with the Reconf of the AccessPoint
               {"EhtMacEpcsPrioAccess",          HAPD_ACTION_NEED_RECONF},
               ));
@@ -1203,6 +1209,43 @@ static whm_mxl_config_flow_e s_chooseGeneralConfigFlow(T_AccessPoint* pAP) {
     return WHM_MXL_CONFIG_FLOW_GENERIC;
 }
 
+static whm_mxl_config_flow_e s_chooseSsidConfigFlow(T_AccessPoint* pAP) {
+    ASSERT_NOT_NULL(pAP, WHM_MXL_CONFIG_FLOW_GENERIC, ME, "No pAP Mapped");
+    T_Radio* pRad = pAP->pRadio;
+    ASSERT_NOT_NULL(pRad, WHM_MXL_CONFIG_FLOW_GENERIC, ME, "No pRad Mapped");
+    /* Schedule reconf only when hostapd is running */
+    ASSERTI_TRUE(wld_secDmn_isEnabled(pRad->hostapd), WHM_MXL_CONFIG_FLOW_GENERIC, ME, "hostapd is not running");
+    wld_hostapd_config_t* pCurrentConfig = NULL;
+    bool ret = wld_hostapd_loadConfig(&pCurrentConfig, pRad->hostapd->cfgFile);
+    ASSERTI_TRUE(ret, WHM_MXL_CONFIG_FLOW_GENERIC, ME, "no saved current config");
+    swl_mapChar_t* pCurrVapParams = wld_hostapd_getConfigMapByBssid(pCurrentConfig, (swl_macBin_t*) pAP->pSSID->BSSID);
+    swl_mapChar_t newVapParams;
+    swl_mapChar_t* pNewVapParams = &newVapParams;
+    swl_mapChar_init(pNewVapParams);
+    wld_hostapd_cfgFile_setVapConfig(pAP, pNewVapParams, (swl_mapChar_t*) NULL);
+
+    /* SSID requires extra checks - handle it first */
+    const char* ssidVapParams[] = {
+        "ssid"
+    };
+    bool ssidChanged = s_isAnyMultipleParamsChanged(pCurrVapParams, pNewVapParams, ssidVapParams, SWL_ARRAY_SIZE(ssidVapParams));
+    if (ssidChanged && !pAP->SSIDAdvertisementEnabled) {
+        SAH_TRACEZ_INFO(ME, "%s: SSID changed with hidden ssid enabled - need reconf", pAP->alias);
+        swl_mapChar_cleanup(pNewVapParams);
+        wld_hostapd_deleteConfig(pCurrentConfig);
+        return WHM_MXL_CONFIG_FLOW_RECONF;
+    }
+
+    const char* ssidRelatedVapParams[] = {
+        "ignore_broadcast_ssid"
+    };
+    bool anyChanged = s_isAnyMultipleParamsChanged(pCurrVapParams, pNewVapParams, ssidRelatedVapParams, SWL_ARRAY_SIZE(ssidRelatedVapParams));
+
+    swl_mapChar_cleanup(pNewVapParams);
+    wld_hostapd_deleteConfig(pCurrentConfig);
+
+    return (anyChanged ? WHM_MXL_CONFIG_FLOW_RECONF : WHM_MXL_CONFIG_FLOW_GENERIC);
+}
 
 static whm_mxl_config_flow_e s_chooseSecurityConfigFlow(T_AccessPoint* pAP) {
     ASSERT_NOT_NULL(pAP, WHM_MXL_CONFIG_FLOW_GENERIC, ME, "No pAP Mapped");
@@ -1239,6 +1282,10 @@ whm_mxl_config_flow_e whm_mxl_chooseVapConfigFlow(T_AccessPoint* pAP, whm_mxl_co
             flow = s_chooseGeneralConfigFlow(pAP);
             break;
         }
+        case WHM_MXL_CONFIG_TYPE_SSID: {
+            flow = s_chooseSsidConfigFlow(pAP);
+            break;
+        }
         case WHM_MXL_CONFIG_TYPE_SECURITY: {
             flow = s_chooseSecurityConfigFlow(pAP);
             break;
@@ -1253,40 +1300,12 @@ whm_mxl_config_flow_e whm_mxl_chooseVapConfigFlow(T_AccessPoint* pAP, whm_mxl_co
     return flow;
 }
 
-swl_rc_ne whm_mxl_updateSsidAdvertisement(T_AccessPoint* pAP) {
-    ASSERT_NOT_NULL(pAP, SWL_RC_INVALID_PARAM, ME, "pAP is NULL");
+static void s_updateMaxAssociatedDevices(T_AccessPoint* pAP) {
+    ASSERT_NOT_NULL(pAP, , ME, "pAP is NULL");
     T_Radio* pRad = pAP->pRadio;
-    ASSERT_NOT_NULL(pRad, SWL_RC_INVALID_PARAM, ME, "pRad is NULL");
-    ASSERT_FALSE((pRad->status == RST_ERROR) || (pRad->status == RST_UNKNOWN), SWL_RC_INVALID_STATE, ME, "%s: Invalid radio state(%d)", pRad->Name, pRad->status);
-    ASSERT_TRUE(wld_secDmn_isAlive(pRad->hostapd), SWL_RC_ERROR, ME, "hostapd not active");
-    /* Set new hidden ssid mode */
-    SAH_TRACEZ_NOTICE(ME, "%s: ssid advertisement mode changed - toggling interface", pAP->alias);
-    wld_ap_hostapd_setParamValue(pAP, "ignore_broadcast_ssid", pAP->SSIDAdvertisementEnabled ? "0" : "2", "update ssid advertisement mode");
-    return whm_mxl_toggleHapd(pRad);
-}
-
-swl_rc_ne whm_mxl_hiddenSsidUpdate(T_AccessPoint* pAP) {
-    ASSERT_NOT_NULL(pAP, SWL_RC_INVALID_PARAM, ME, "pAP is NULL");
-    T_Radio* pRad = pAP->pRadio;
-    ASSERT_NOT_NULL(pRad, SWL_RC_INVALID_PARAM, ME, "pRad is NULL");
-    ASSERT_FALSE((pRad->status == RST_ERROR) || (pRad->status == RST_UNKNOWN), SWL_RC_INVALID_STATE, ME, "%s: Invalid radio state(%d)", pRad->Name, pRad->status);
-    T_SSID* pSSID = (T_SSID*) pAP->pSSID;
-    ASSERTI_NOT_NULL(pSSID, SWL_RC_ERROR, ME, "pSSID is NULL");
-    ASSERT_TRUE((!pAP->SSIDAdvertisementEnabled), SWL_RC_INVALID_STATE, ME, "%s: hidden ssid disabled no update needed", pAP->alias);
-    ASSERT_TRUE(wld_secDmn_isAlive(pRad->hostapd), SWL_RC_ERROR, ME, "hostapd not active");
-    /* Update hidden SSID */
-    SAH_TRACEZ_NOTICE(ME, "%s: Hidden ssid enabled - updating ssid and toggling interface", pAP->alias);
-    wld_ap_hostapd_setParamValue(pAP, "ssid", pSSID->SSID, "set new hidden ssid");
-    wld_ap_hostapd_reloadSecKey(pAP, "reload hidden ssid sec key");
-    return whm_mxl_toggleHapd(pRad);
-}
-
-swl_rc_ne whm_mxl_updateMaxAssociatedDevices(T_AccessPoint* pAP) {
-    ASSERT_NOT_NULL(pAP, SWL_RC_INVALID_PARAM, ME, "pAP is NULL");
-    T_Radio* pRad = pAP->pRadio;
-    ASSERT_NOT_NULL(pRad, SWL_RC_INVALID_PARAM, ME, "pRad is NULL");
-    ASSERTI_FALSE((pRad->status == RST_ERROR) || (pRad->status == RST_UNKNOWN), SWL_RC_INVALID_STATE, ME, "%s: Invalid radio state(%d)", pRad->Name, pRad->status);
-    ASSERTI_TRUE(wld_secDmn_isAlive(pRad->hostapd), SWL_RC_ERROR, ME, "hostapd not active");
+    ASSERT_NOT_NULL(pRad, , ME, "pRad is NULL");
+    ASSERTI_FALSE((pRad->status == RST_ERROR) || (pRad->status == RST_UNKNOWN), , ME, "%s: Invalid radio state(%d)", pRad->Name, pRad->status);
+    ASSERTI_TRUE(wld_secDmn_isAlive(pRad->hostapd), , ME, "hostapd not active");
     SAH_TRACEZ_NOTICE(ME, "%s: Updating Number of Max associated Devices", pAP->alias);
     if(pAP->ActiveAssociatedDeviceNumberOfEntries > pAP->MaxStations) {
         swl_mapChar_t newVapParams;
@@ -1295,8 +1314,13 @@ swl_rc_ne whm_mxl_updateMaxAssociatedDevices(T_AccessPoint* pAP) {
         wld_hostapd_cfgFile_setVapConfig(pAP, pNewVapParams, (swl_mapChar_t*) NULL);
         wld_ap_hostapd_setParamValue(pAP, "max_num_sta", swl_mapChar_get(pNewVapParams, "max_num_sta"), "update max_num_sta");
         swl_mapChar_cleanup(pNewVapParams);
-        return whm_mxl_toggleHapd(pRad);
+        whm_mxl_toggleHapd(pRad);
     }
+}
+
+swl_rc_ne whm_mxl_updateOnEventMaxAssociatedDevices(T_AccessPoint* pAP) {
+    ASSERT_NOT_NULL(pAP, SWL_RC_INVALID_PARAM, ME, "pAP is NULL");
+    swla_delayExec_addTimeout((swla_delayExecFun_cbf) s_updateMaxAssociatedDevices, pAP, DM_EVENT_HOOK_TIMEOUT_MS);
     return SWL_RC_OK;
 }
 

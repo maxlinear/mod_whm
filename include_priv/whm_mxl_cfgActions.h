@@ -13,6 +13,7 @@
 
 #define MSG_LENGTH 4096
 #define MAX_NUM_OF_DIGITS 20
+#define DM_EVENT_HOOK_TIMEOUT_MS 100
 
 typedef enum {
     HAPD_ACTION_ERROR = -1,
@@ -33,6 +34,7 @@ typedef enum {
 
 typedef enum {
     WHM_MXL_CONFIG_TYPE_GENRAL,
+    WHM_MXL_CONFIG_TYPE_SSID,
     WHM_MXL_CONFIG_TYPE_SECURITY,
     WHM_MXL_CONFIG_TYPE_MAX
 } whm_mxl_config_type_e;
@@ -59,9 +61,7 @@ swl_rc_ne whm_mxl_restartAllRadios();
 swl_rc_ne whm_mxl_set_vendorMultipleParams(T_AccessPoint* pAP, const char* params[], uint32_t nParams);
 swl_rc_ne whm_mxl_updateMultiAp(T_AccessPoint* pAP);
 swl_rc_ne whm_mxl_handleMbssidOverride(T_Radio* pRad, bool overideMbssid);
-swl_rc_ne whm_mxl_hiddenSsidUpdate(T_AccessPoint* pAP);
-swl_rc_ne whm_mxl_updateSsidAdvertisement(T_AccessPoint* pAP);
-swl_rc_ne whm_mxl_updateMaxAssociatedDevices(T_AccessPoint* pAP);
+swl_rc_ne whm_mxl_updateOnEventMaxAssociatedDevices(T_AccessPoint* pAP);
 swl_rc_ne whm_mxl_configureSaeExt(T_AccessPoint* pAP);
 swl_rc_ne whm_mxl_hostapd_setMldParams(T_AccessPoint* pAP);
 swl_rc_ne whm_mxl_toggleWPA3PersonalCompatibility(T_AccessPoint* pAP);

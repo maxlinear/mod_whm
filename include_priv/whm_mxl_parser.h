@@ -13,7 +13,7 @@
 
 #include "wld/wld.h"
 
-swl_rc_ne mxl_parseNaStaEvt(T_Radio* pRad, struct nlattr* tb[]);
+swl_rc_ne mxl_parseNaStaStats(T_Radio* pRad, struct nlattr* tb[], uint8_t reqType, bool syncDm);
 swl_rc_ne mxl_parseChanDataEvt(T_Radio* pRad, struct nlattr* tb[]);
 swl_rc_ne mxl_parseCsiStatsEvt(T_Radio* pRad, struct nlattr* tb[]);
 swl_rc_ne mxl_parseWiphyInfo(swl_rc_ne rc, struct nlmsghdr* nlh, void* priv);

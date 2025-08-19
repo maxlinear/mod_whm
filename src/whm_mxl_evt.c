@@ -71,8 +71,8 @@ static void s_vendorEvtCb(void* pRef, void* pData _UNUSED, struct nlmsghdr* nlh,
     switch(subcmd) {
     case LTQ_NL80211_VENDOR_EVENT_UNCONNECTED_STA: {
         SAH_TRACEZ_INFO(ME, "%s: parse NaSta event", pRad->Name);
-        if(mxl_parseNaStaEvt(pRad, tb) == SWL_RC_OK) {
-            mxl_monitor_checkRunNaStaList(pRad);
+        if(mxl_parseNaStaStats(pRad, tb, NASTA_STATS_REQ_ASYNC, true) == SWL_RC_OK) {
+            whm_mxl_monitor_checkRunNaStaList(pRad);
         }
         break;
     }

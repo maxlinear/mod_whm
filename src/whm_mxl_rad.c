@@ -75,7 +75,7 @@ mxl_VendorData_t* mxl_rad_getVendorData(const T_Radio* pRad) {
 
 static void s_mxl_rad_init_vendordata(T_Radio* pRad) {
     ASSERT_NOT_NULL(pRad, , ME, "NULL");
-    mxl_monitor_init(pRad);
+    whm_mxl_monitor_init(pRad);
     whm_mxl_rad_delVap_timer_init(pRad);
 }
 
@@ -204,6 +204,11 @@ int whm_mxl_rad_enable(T_Radio* pRad, int val, int set) {
 static void s_deinitRadVendorData(T_Radio* pRad) {
     mxl_VendorData_t* vendorData = mxl_rad_getVendorData(pRad);
     ASSERT_NOT_NULL(vendorData, , ME, "NULL");
+#ifdef CONFIG_VENDOR_MXL_PROPRIETARY
+    if (vendorData->acs_exclusion_ch_list) {
+        free(vendorData->acs_exclusion_ch_list);
+    }
+#endif /* CONFIG_VENDOR_MXL_PROPRIETARY */
     free(vendorData);
 }
 
@@ -213,7 +218,7 @@ void whm_mxl_rad_destroyHook(T_Radio* pRad) {
     whm_mxl_unregisterToWdsEvent();
     whm_mxl_reconfMngr_deinit(pRad);
     whm_mxl_rad_delVap_timer_deinit(pRad);
-    mxl_monitor_deinit(pRad);
+    whm_mxl_monitor_deinit(pRad);
     s_deinitRadVendorData(pRad);
     CALL_NL80211_FTA(mfn_wrad_destroy_hook, pRad);
 }
@@ -1059,7 +1064,7 @@ amxd_status_t _whm_mxl_rad_debug(amxd_object_t* object,
     const char* feature = GET_CHAR(args, "op");
 
     if (swl_str_matches(feature, "StaScanTime")) {
-        mxl_monitor_getStaScanTimeOut(pRad);
+        whm_mxl_monitor_getStaScanTimeOut(pRad);
         mxl_VendorData_t* vendorData = mxl_rad_getVendorData(pRad);
         ASSERT_NOT_NULL(vendorData, amxd_status_invalid_value, ME, "vendorData NULL");
         amxc_var_add_key(int32_t, retval, "StaScanTime", vendorData->naSta.scanTimeout);
@@ -1154,9 +1159,9 @@ SWLA_DM_HDLRS(sRadVendorDmHdlrs,
                   SWLA_DM_PARAM_HDLR("HePhyLdpcCodingInPayload", s_setRadioBoolCertVendorParam_pwf),
                   SWLA_DM_PARAM_HDLR("HeMacMsduAckEnabledMpduSupport", s_setRadioBoolCertVendorParam_pwf),
                   SWLA_DM_PARAM_HDLR("HeMacOmControlSupport", s_setRadioBoolCertVendorParam_pwf),
-                  SWLA_DM_PARAM_HDLR("HtMinMpduStartSpacing", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("HtMinMpduStartSpacing", s_setRadioUint32CertVendorParam_pwf),
                   SWLA_DM_PARAM_HDLR("MultibssEnable", s_setRadioBoolCertVendorParam_pwf),
-                  SWLA_DM_PARAM_HDLR("HePhyMacNc", s_setRadioBoolCertVendorParam_pwf),
+                  SWLA_DM_PARAM_HDLR("HePhyMaxNc", s_setRadioUint32CertVendorParam_pwf),
                   SWLA_DM_PARAM_HDLR("SrCtrlHesigaSpatialReuseVal15", s_setRadioBoolCertVendorParam_pwf),
                   SWLA_DM_PARAM_HDLR("HeOperationCohostedBss", s_setRadioBoolCertVendorParam_pwf),
                   SWLA_DM_PARAM_HDLR("HeMuEdcaIePresent", s_setRadioBoolCertVendorParam_pwf),
@@ -1612,6 +1617,114 @@ void _whm_mxl_rad_setDelayedStartConf_ocf(const char* const sig_name,
 }
 
 #ifdef CONFIG_VENDOR_MXL_PROPRIETARY
+#define MAX_ACS_EXCLUSION_LIST_SIZE 2048
+swl_rc_ne whm_mxl_rad_startPltfACS(T_Radio* pRad , const amxc_var_t* const args) {
+    SAH_TRACEZ_IN(ME);
+    ASSERT_NOT_NULL(pRad, SWL_RC_INVALID_PARAM, ME, "pRad is NULL");
+    mxl_VendorData_t* pRadVendor = mxl_rad_getVendorData(pRad);
+    ASSERT_NOT_NULL(pRadVendor, SWL_RC_INVALID_PARAM, ME, "pRadVendor is NULL");
+    char* cmd = NULL;
+    size_t cmd_len = 0;
+    bool first = true;
+    uint32_t listCount = 0;
+    T_AccessPoint* masterVap = whm_mxl_utils_getMasterVap(pRad);
+    ASSERT_NOT_NULL(masterVap, SWL_RC_INVALID_PARAM, ME, "masterVap is NULL");
+    bool ctrlIfaceReady = wld_wpaCtrlInterface_isReady(masterVap->wpaCtrlInterface);
+    bool radioIsAlive = wld_rad_isActive(pRad);
+
+    amxc_var_t* variant = GET_ARG(args, "acs_list");
+    if (variant == NULL) {
+        SAH_TRACEZ_INFO(ME, "%s: ACS Exclude OpClass/Channel list is empty, unsetting ACS exclusion channel list", pRad->Name);
+        if (ctrlIfaceReady && radioIsAlive) {
+            whm_mxl_hostapd_sendCommand(masterVap, "ACS_EX_OP_LIST 0 0", "Unset ACS exclusion channel list");
+            whm_mxl_hostapd_sendCommand(masterVap, "CHAN_SWITCH 5 0", "Trigger ACS");
+        } else {
+            SAH_TRACEZ_ERROR(ME, "%s: Unable to execute ACS exclusion channel list unset command: ctrlIfaceReady=%d, radioIsAlive=%d",
+                             pRad->Name, ctrlIfaceReady, radioIsAlive);
+        }
+        if (pRadVendor->acs_exclusion_ch_list) {
+            free(pRadVendor->acs_exclusion_ch_list);
+            pRadVendor->acs_exclusion_ch_list = NULL;
+        }
+        pRadVendor->acs_exclusion_list_count = 0;
+        return whm_mxl_confModHapd(pRad, masterVap);
+    }
+
+    amxc_var_for_each(data, variant) {
+        uint32_t opclass = GET_UINT32(data, "opclass");
+        amxc_var_t* exclude_channels_var = GET_ARG(data, "exclude_channels");
+        if (exclude_channels_var == NULL) {
+            SAH_TRACEZ_ERROR(ME, "exclude_channels_var is NULL");
+            return SWL_RC_INVALID_PARAM;
+        }
+
+        amxc_llist_t* exclude_channels_list = amxc_var_dyncast(amxc_llist_t, exclude_channels_var);
+        amxc_llist_for_each(it, exclude_channels_list) {
+            amxc_var_t* item = amxc_var_from_llist_it(it);
+            uint8_t channel = amxc_var_dyncast(uint8_t, item);
+
+            if (!wld_rad_hasChannel(pRad, channel)) {
+                SAH_TRACEZ_WARNING(ME, "%s: Skip invalid channel %u", pRad->Name, channel);
+                continue;
+            }
+
+            // Calculate the required length for the new entry
+            size_t new_entry_len = snprintf(NULL, 0, "%s%u/%u", first ? "" : " ", opclass, channel) + 1;
+
+            // Reallocate memory for the command string
+            char* new_cmd = realloc(cmd, cmd_len + new_entry_len);
+            if (new_cmd == NULL) {
+                SAH_TRACEZ_ERROR(ME, "Memory allocation failed");
+                free(cmd);
+                return SWL_RC_ERROR;
+            }
+            cmd = new_cmd;
+
+            // Append the new entry to the command string
+            snprintf(cmd + cmd_len, new_entry_len, "%s%u/%u", first ? "" : ",", opclass, channel);
+            cmd_len += new_entry_len - 1;
+
+            first = false;
+            listCount++;
+        }
+    }
+
+    if (cmd) {
+        SAH_TRACEZ_INFO(ME, "%s: ACS Exclude OpClass/Channel list: %s", pRad->Name, cmd);
+        if (ctrlIfaceReady && radioIsAlive) {
+            // If cmd is valid then count should be non-zero
+            if (listCount == 0) {
+                SAH_TRACEZ_ERROR(ME, "%s: ACS Exclusion list count is zero, cannot set list", pRad->Name);
+                free(cmd);
+                return SWL_RC_ERROR;
+            }
+            size_t cmdSize = (swl_str_len(cmd) > MAX_ACS_EXCLUSION_LIST_SIZE) ? MAX_ACS_EXCLUSION_LIST_SIZE : swl_str_len(cmd);
+            size_t formatSize = swl_str_len("ACS_EX_OP_LIST") + cmdSize + 32;
+            char* formattedCmd = calloc(1, formatSize);
+            ASSERT_NOT_NULL(formattedCmd, SWL_RC_ERROR, ME, "failed to allocate cmd buffer");
+            swl_str_catFormat(formattedCmd, formatSize, "ACS_EX_OP_LIST %u %s", listCount, cmd);
+            whm_mxl_hostapd_sendCommand(masterVap, formattedCmd, "Set ACS exclusion channel list");
+            free(formattedCmd);
+            whm_mxl_hostapd_sendCommand(masterVap, "CHAN_SWITCH 5 0", "Trigger ACS");
+        } else {
+            SAH_TRACEZ_ERROR(ME, "%s: Unable to execute ACS exclusion channel list set command: ctrlIfaceReady=%d, radioIsAlive=%d",
+                             pRad->Name, ctrlIfaceReady, radioIsAlive);
+        }
+        //Setting new ACS exclusion channel list
+        pRadVendor->acs_exclusion_ch_list = strdup(cmd);
+        pRadVendor->acs_exclusion_list_count = listCount;
+        if (pRadVendor->acs_exclusion_ch_list == NULL) {
+            SAH_TRACEZ_ERROR(ME, "Failed to allocate memory for ACS exclusion channel list");
+            free(cmd);
+            return SWL_RC_ERROR;
+        }
+        whm_mxl_confModHapd(pRad, masterVap);
+    }
+    free(cmd);
+    SAH_TRACEZ_OUT(ME);
+    return SWL_RC_OK;
+}
+
 int whm_mxl_rad_autoChannelEnable(T_Radio* pRad, int enable, int set) {
     SAH_TRACEZ_IN(ME);
     int ret = SWL_RC_OK;
@@ -1777,28 +1890,39 @@ void _whm_mxl_rad_setObssScanParams_ocf(const char* const sig_name,
     swla_dm_procObjEvtOfLocalDm(&sObssScanConfigDmHdlrs, sig_name, data, priv);
 }
 
-void _whm_mxl_rad_updateObssCoexistence(const char* const sig_name _UNUSED,
-                                    const amxc_var_t* const data,
-                                    void* const priv _UNUSED) {
-    amxd_object_t* object = amxd_dm_signal_get_object(get_wld_plugin_dm(), data);
-    ASSERTS_NOT_NULL(object, , ME, "object is NULL");
-    T_Radio* pRad = (T_Radio*) object->priv;
-    ASSERTS_NOT_NULL(pRad, , ME, "pRad is NULL");
-    ASSERTS_NOT_NULL(pRad->pBus, , ME, "pBus is NULL");
-    ASSERT_FALSE((pRad->status == RST_ERROR) || (pRad->status == RST_UNKNOWN), , ME, "Invalid radio state");
-    ASSERT_TRUE(wld_rad_is_24ghz(pRad), , ME, "%s: ObssCoexistence only handled in 2.4G Radio", pRad->Name);
+static void s_updateObssInterval(T_Radio* pRad) {
+    SAH_TRACEZ_IN(ME);
+    ASSERT_NOT_NULL(pRad, , ME, "pRad is NULL");
     mxl_VendorData_t* pRadVendor = mxl_rad_getVendorData(pRad);
     ASSERTS_NOT_NULL(pRadVendor, , ME, "pRadVendor is NULL");
     amxd_object_t* pVendorObj = pRadVendor->pBus;
     ASSERT_NOT_NULL(pVendorObj, , ME, "pVendorObj is NULL");
     amxd_object_t* obssObj = amxd_object_get(pVendorObj, "ObssScanParams");
     ASSERT_NOT_NULL(obssObj, , ME, "obssObj is NULL");
-    SAH_TRACEZ_NOTICE(ME, "%s: Updating obss interval due to change in ObssCoexistanceEnabled to (%d)", pRad->Name, pRad->obssCoexistenceEnabled);
-    /* Prepare and do DM transaction */
+    SAH_TRACEZ_NOTICE(ME, "%s: Updating obss interval due to change in ObssCoexistanceEnabled (%d)", pRad->Name, pRad->obssCoexistenceEnabled);
     amxd_trans_t trans;
     ASSERT_TRANSACTION_INIT(obssObj, &trans, , ME, "%s: trans init failure", pRad->Name);
     amxd_trans_set_int32_t(&trans, "ObssInterval", (pRad->obssCoexistenceEnabled ? DEF_OBSS_INTERVAL : 0));
-    swl_object_finalizeTransactionOnLocalDm(&trans);
+        /* Prepare and do DM transaction */
+    amxd_status_t status = swl_object_finalizeTransactionOnLocalDm(&trans);
+    ASSERT_TRUE((status == amxd_status_ok), , ME, "%s: transaction to ObssInterval failed ", pRad->Name);
+    SAH_TRACEZ_OUT(ME);
+}
+
+void _whm_mxl_rad_updateObssCoexistence(const char* const sig_name _UNUSED,
+                                    const amxc_var_t* const data,
+                                    void* const priv _UNUSED) {
+    SAH_TRACEZ_IN(ME);
+    amxd_object_t* object = amxd_dm_signal_get_object(get_wld_plugin_dm(), data);
+    ASSERTS_NOT_NULL(object, , ME, "object is NULL");
+    T_Radio* pRad = (T_Radio*) object->priv;
+    ASSERTS_NOT_NULL(pRad, , ME, "pRad is NULL");
+    ASSERTS_NOT_NULL(pRad->pBus, , ME, "pBus is NULL");
+    ASSERT_FALSE((pRad->status == RST_ERROR) || (pRad->status == RST_UNKNOWN), , ME, "Invalid radio state");
+    ASSERTI_TRUE(wld_rad_is_24ghz(pRad), , ME, "%s: ObssCoexistence only handled in 2.4G Radio", pRad->Name);
+    SAH_TRACEZ_NOTICE(ME, "%s: ObssCoexistanceEnabled changed event", pRad->Name);
+    swla_delayExec_addTimeout((swla_delayExecFun_cbf) s_updateObssInterval, pRad, DM_EVENT_HOOK_TIMEOUT_MS);
+    SAH_TRACEZ_OUT(ME);
 }
 
 swl_rc_ne whm_mxl_rad_supstd(T_Radio* pRad, swl_radioStandard_m radioStandards) {
@@ -1875,47 +1999,6 @@ void whm_mxl_rad_requestSync(T_Radio* pRad) {
 }
 
 /**
- * @brief Fetch Tx Power data from MxL Vendor NL
- *
- * @param T_Radio* Radio pointer
- * @param mxl_txPower_type_e Type of transmit power to return
- * @return int32_t txPower in dBm
- */
-int32_t mxl_rad_getTxPower(T_Radio* pRad, mxl_txPower_type_e txPowerType) {
-    ASSERT_TRUE(wld_rad_hasActiveIface(pRad), SWL_RC_ERROR, ME, "%s not ready", pRad->Name);
-    uint32_t ifIndex = wld_rad_getFirstEnabledIfaceIndex(pRad);
-    ASSERT_TRUE(ifIndex > 0, SWL_RC_ERROR, ME, "%s: rad has no enabled iface", pRad->Name);
-
-    swl_rc_ne rc = SWL_RC_ERROR;
-    struct mxl_vendor_tx_power txPowerData;
-    int32_t txPower = -1;
-    struct cbData_t getData;
-
-    getData.size = sizeof(struct mxl_vendor_tx_power);
-    getData.data = &txPowerData;
-    rc = wld_rad_nl80211_sendVendorSubCmd(pRad, OUI_MXL, LTQ_NL80211_VENDOR_SUBCMD_GET_20MHZ_TX_POWER, NULL, 0,
-                                          VENDOR_SUBCMD_IS_SYNC, VENDOR_SUBCMD_IS_WITHOUT_ACK, 0, s_getDataCb, &getData);
-    ASSERTI_FALSE(rc < SWL_RC_OK, SWL_RC_ERROR, ME, "Failed to call LTQ_NL80211_VENDOR_SUBCMD_GET_20MHZ_TX_POWER");
-
-    switch (txPowerType) {
-        case TX_POWER_RNR:
-            txPower = txPowerData.rnr_20mhz_tx_power;
-            break;
-        case TX_POWER_CURRENT:
-            txPower = txPowerData.cur_tx_power;
-            break;
-        case TX_POWER_MAX:
-            txPower = txPowerData.max_tx_power;
-            break;
-        default:
-            SAH_TRACEZ_ERROR(ME, "%s: Invalid Tx Power Type", pRad->Name);
-            txPower = -1;
-    }
-
-    return txPower;
-}
-
-/**
  * @brief FTA Handler to fetch current transmit power in dBm
  *
  * @param T_Radio* Pointer to the radio
@@ -1924,29 +2007,46 @@ int32_t mxl_rad_getTxPower(T_Radio* pRad, mxl_txPower_type_e txPowerType) {
  */
 swl_rc_ne whm_mxl_rad_getTxPowerdBm(T_Radio* pRad, int32_t* dbm) {
     ASSERT_NOT_NULL(pRad, SWL_RC_INVALID_PARAM, ME, "NULL");
+    ASSERT_TRUE(wld_rad_hasActiveIface(pRad), SWL_RC_ERROR, ME, "%s not ready", pRad->Name);
+    uint32_t ifIndex = wld_rad_getFirstEnabledIfaceIndex(pRad);
+    ASSERT_TRUE(ifIndex > 0, SWL_RC_ERROR, ME, "%s: rad has no enabled iface", pRad->Name);
 
-    *dbm = mxl_rad_getTxPower(pRad, TX_POWER_CURRENT);
-    ASSERT_FALSE(*dbm < 0, SWL_RC_ERROR, ME, "%s: Failed to get Tx Power", pRad->Name);
+    struct mxl_vendor_tx_power txPowerData;
+    struct cbData_t getData = { .size = sizeof(struct mxl_vendor_tx_power), .data = &txPowerData };
+    swl_rc_ne rc = SWL_RC_ERROR;
+    rc = wld_rad_nl80211_sendVendorSubCmd(pRad, OUI_MXL, LTQ_NL80211_VENDOR_SUBCMD_GET_20MHZ_TX_POWER, NULL, 0,
+                                          VENDOR_SUBCMD_IS_SYNC, VENDOR_SUBCMD_IS_WITHOUT_ACK, 0, s_getDataCb, &getData);
+    ASSERTI_FALSE(rc < SWL_RC_OK, SWL_RC_ERROR, ME, "Failed to call LTQ_NL80211_VENDOR_SUBCMD_GET_20MHZ_TX_POWER");
+    *dbm = txPowerData.cur_tx_power;
     SAH_TRACEZ_INFO(ME, "%s: Received Current Tx Power of %d", pRad->Name, *dbm);
 
     return SWL_RC_OK;
 }
 
 /**
- * @brief FTA Handler to fetch maximum transmit power in dBm
+ * @brief FTA Handler to fetch maximum transmit power of a channel in dBm
  *
  * @param T_Radio* rad pointer to the radio
- * @param uint16_t channel channel number (Unused)
+ * @param uint16_t channel channel number
  * @param int32_t* dbm pointer to store the current transmit power in dBm
  * @return swl_rc_ne SWL_RC_OK on success, error code otherwise
  */
 swl_rc_ne whm_mxl_rad_getMaxTxPowerdBm(T_Radio* pRad, uint16_t channel, int32_t* dbm) {
     ASSERT_NOT_NULL(pRad, SWL_RC_INVALID_PARAM, ME, "NULL");
+    ASSERT_TRUE(wld_rad_hasActiveIface(pRad), SWL_RC_ERROR, ME, "%s not ready", pRad->Name);
+    uint32_t ifIndex = wld_rad_getFirstEnabledIfaceIndex(pRad);
+    ASSERT_TRUE(ifIndex > 0, SWL_RC_ERROR, ME, "%s: rad has no enabled iface", pRad->Name);
 
-    *dbm = mxl_rad_getTxPower(pRad, TX_POWER_MAX);
-    ASSERT_FALSE(*dbm < 0, SWL_RC_ERROR, ME, "%s: Failed to get Tx Power", pRad->Name);
-    SAH_TRACEZ_INFO(ME, "%s: input channel %d is not required", pRad->Name, channel);
-    SAH_TRACEZ_INFO(ME, "%s: Received Max Tx Power of %d", pRad->Name, *dbm);
+    wave_wssa_max_tx_power_stats_t maxTxPowerData;
+    struct cbData_t getData = { .size = sizeof(wave_wssa_max_tx_power_stats_t), .data = &maxTxPowerData };
+    swl_rc_ne rc = SWL_RC_ERROR;
+    rc = wld_rad_nl80211_sendVendorSubCmd(pRad, OUI_MXL, LTQ_NL80211_VENDOR_SUBCMD_GET_MAX_TX_POWER, &channel, sizeof(channel),
+                                          VENDOR_SUBCMD_IS_SYNC, VENDOR_SUBCMD_IS_WITHOUT_ACK, 0, s_getDataCb, &getData);
+    ASSERTI_FALSE(rc < SWL_RC_OK, SWL_RC_ERROR, ME, "Failed to call LTQ_NL80211_VENDOR_SUBCMD_GET_MAX_TX_POWER");
+    ASSERT_TRUE(maxTxPowerData.channel == channel, SWL_RC_ERROR, ME, "%s: channel mismatch: expected %u, got %u",
+                 pRad->Name, channel, maxTxPowerData.channel);
+    *dbm = maxTxPowerData.max_tx_power;
+    SAH_TRACEZ_INFO(ME, "%s: Received Max Tx Power of %d for channel %d", pRad->Name, *dbm, channel);
 
     return SWL_RC_OK;
 }

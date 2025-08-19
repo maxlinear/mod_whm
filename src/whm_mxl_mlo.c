@@ -159,6 +159,7 @@ void whm_mxl_destroyMLVap(T_AccessPoint* pAP) {
     T_Radio* pRad   = pAP->pRadio;
     /* Fetch Sibling VAP details from pAP object */
     T_AccessPoint* sibAP = whm_mxl_getSiblingBss(pAP, mxlVapVendorData->mloId);
+    ASSERT_NOT_NULL(sibAP, , ME, "sibAP is NULL");
     amxd_object_t* link2VendorObj = amxd_object_get(sibAP->pBus, "Vendor");
     amxd_object_t* link2MloObj = amxd_object_get(link2VendorObj, "MLO");
     ASSERT_NOT_NULL(link2MloObj, , ME, "link2MloObj is NULL");

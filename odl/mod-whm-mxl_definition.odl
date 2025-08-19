@@ -114,6 +114,7 @@
                 %persistent bool BackgroundCac = true {
                     on action validate call whm_mxl_rad_validateBackgroundCac_pvf;
                 }
+                /* Certification configuration paramneter starts here */
                 %persistent bool TestBedMode {
                     default false;
                 }
@@ -129,8 +130,9 @@
                 %persistent bool HeMacOmControlSupport {
                     default true;
                 }
-                %persistent bool HtMinMpduStartSpacing {
-                    default false;
+                %persistent uint32 HtMinMpduStartSpacing {
+                    on action validate call check_range { min = 0, max = 8 };
+                    default 5;
                 }
                 %persistent bool MultibssEnable {
                     default false;
@@ -153,8 +155,8 @@
                 %persistent string VhtMcsSetPart1{
                     default "65530";
                 }
-                %persistent bool HePhyMacNc {
-                    default true;
+                %persistent uint32 HePhyMaxNc {
+                    default 0;
                 }
                 %persistent bool SrCtrlHesigaSpatialReuseVal15 {
                     default false;
@@ -187,58 +189,58 @@
                     default false;
                 }
                 %persistent uint8 HeMuEdcaAcBeEcwmin {
-                        default 15;
+                    default 15;
                 }
                 %persistent uint8 HeMuEdcaAcBeEcwmax {
-                        default 15;
+                    default 15;
                 }
-                %persistent uint8 HeMuEdcaAcBeTimer {
-                        default 255;
+                %persistent uint32 HeMuEdcaAcBeTimer = 5 {
+                    on action validate call check_range { min = 5, max = 255 };
                 }
                 %persistent bool HeMuEdcaAcBkAifsn {
                     default false;
                 }
                 %persistent uint8 HeMuEdcaAcBkAci {
-                        default 1;
+                    default 1;
                 }
                 %persistent uint8 HeMuEdcaAcBkEcwmin {
-                        default 15;
+                    default 15;
                 }
                 %persistent uint8 HeMuEdcaAcBkEcwmax {
-                        default 15;
+                    default 15;
                 }
-                %persistent uint8 HeMuEdcaAcBkTimer {
-                        default 255;
+                %persistent uint32 HeMuEdcaAcBkTimer = 5 {
+                    on action validate call check_range { min = 5, max = 255 };
                 }
                %persistent bool HeMuEdcaAcViAifsn {
                     default false;
                 }
                 %persistent uint8 HeMuEdcaAcViAci {
-                        default 2;
+                    default 2;
                 }
                 %persistent uint8 HeMuEdcaAcViEcwmin {
-                        default 15;
+                    default 15;
                 }
                 %persistent uint8 HeMuEdcaAcViEcwmax {
-                        default 15;
+                    default 15;
                 }
-                %persistent uint8 HeMuEdcaAcViTimer {
-                        default 255;
+                %persistent uint32 HeMuEdcaAcViTimer = 5 {
+                    on action validate call check_range { min = 5, max = 255 };
                 }
                 %persistent bool HeMuEdcaAcVoAifsn {
                     default false;
                 }
                 %persistent uint8 HeMuEdcaAcVoAci {
-                        default 2;
+                    default 3;
                 }
                 %persistent uint8 HeMuEdcaAcVoEcwmin {
-                        default 15;
+                    default 15;
                 }
                 %persistent uint8 HeMuEdcaAcVoEcwmax {
-                        default 15;
+                    default 15;
                 }
-                %persistent uint8 HeMuEdcaAcVoTimer {
-                        default 255;
+                %persistent uint32 HeMuEdcaAcVoTimer = 5 {
+                    on action validate call check_range { min = 5, max = 255 };
                 }
                 %persistent bool EnableEhtDebugMode {
                     default true;
@@ -262,25 +264,25 @@
                     default true;
                 }
                 %persistent uint8 EhtMcsMapLessOrEq80MHzRx09 {
-                        default 2;
+                    default 2;
                 }
                 %persistent uint8 EhtMcsMapLessOrEq80MHzTx09 {
-                        default 2;
+                    default 2;
                 }
                 %persistent uint8 EhtMcsMapLessOrEq80MHzRx1011 {
-                        default 2;
+                    default 2;
                 }
                 %persistent uint8 EhtMcsMapLessOrEq80MHzTx1011 {
-                        default 2;
+                    default 2;
                 }
                 %persistent uint8 EhtMcsMapLessOrEq80MHzRx1213 {
-                        default 2;
+                    default 2;
                 }
                 %persistent uint8 EhtMcsMapLessOrEq80MHzTx1213 {
-                        default 2;
+                    default 2;
                 }
                 %persistent uint8 EhtPhyMaxAmpduLenExpExt {
-                        default 2;
+                    default 2;
                 }
                 %persistent bool EhtPhySuBeamformer {
                     default false;
@@ -307,46 +309,46 @@
                     default 0;
                 }
                 %persistent uint8 EhtPhyCommonNominalPktPad {
-                        default 2;
+                    default 2;
                 }
                 %persistent uint8 EhtMcsMap160MHzRxMcs09 {
-                        default 2;
+                    default 2;
                 }
                 %persistent uint8 EhtMcsMap160MHzTxMcs09 {
-                        default 2;
+                    default 2;
                 }
                 %persistent uint8 EhtMcsMap160MHzTxMcs1011 {
-                        default 2;
+                    default 2;
                 }
                 %persistent uint8 EhtMcsMap160MHzRxMcs1011 {
-                        default 2;
+                    default 2;
                 }
                 %persistent uint8 EhtMcsMap160MHzTxMcs1213 {
-                        default 2;
+                    default 2;
                 }
                 %persistent uint8 EhtMcsMap160MHzRxMcs1213 {
-                        default 2;
+                    default 2;
                 }
                %persistent uint8 EhtMcsMap320MHzRxMcs09 {
-                        default 2;
+                    default 2;
                 }
                 %persistent uint8 EhtMcsMap320MHzTxMcs09 {
-                        default 2;
+                    default 2;
                 }
                 %persistent uint8 EhtMcsMap320MHzRxMcs1011 {
-                        default 2;
+                    default 2;
                 }
                 %persistent uint8 EhtMcsMap320MHzTxMcs1011 {
-                        default 2;
+                    default 2;
                 }
                 %persistent uint8 EhtMcsMap320MHzRxMcs1213 {
-                        default 2;
+                    default 2;
                 }
                 %persistent uint8 EhtMcsMap320MHzTxMcs1213 {
-                        default 2;
+                    default 2;
                 }
                 %persistent uint8 EhtPhy320MHzIn6GHz {
-                        default 1;
+                    default 1;
                 }
                 %persistent bool AdvertiseEcsaIe {
                     default true;
@@ -582,6 +584,7 @@
                 %persistent string Country3 {
                     default "";
                 }
+                /* Certification configuration ends here */
                 /**
                 * HT Capabilites
                 * Enable or disable desired capabilites
@@ -723,7 +726,7 @@
                     */
                     %persistent uint16 AcsBgScanInterval {
                         on action validate call whm_mxl_rad_validateBgAcsInterval_pvf;
-                        default 0;
+                        default 60;
                     }
                     /*
                     * The below Three parameters are only for
@@ -874,7 +877,7 @@
                     }
                 }
                 /*
-                * Srart after parameters
+                * Start after parameters
                 */
                 %persistent object DelayedStart {
                     on event "*" call whm_mxl_rad_setDelayedStartConf_ocf;
@@ -1096,6 +1099,10 @@
                 %persistent bool SetBridgeMode {
                     default false;
                 }
+                /*enable_bss_load_ie*/
+                %persistent bool EnableBssLoad {
+                    default true;
+                }
                 /*
                 * Configure WPA3 Personal Compatibility Mode
                 * NOTE: This is a hacky method. At the time of implementation
@@ -1161,10 +1168,10 @@
                     default 4;
                 }
                 %persistent int32 WmmAcVICWMax {
-                    default 10;
+                    default 4;
                 }
                 %persistent int32 WmmAcVOCWMax {
-                    default 9;
+                    default 3;
                 }
                 %persistent int32 WmmAcBECWMax {
                     default 10;
@@ -1251,6 +1258,21 @@
                 %persistent int32 GasCBDelay {
                     on action validate call check_range { min = 0, max = 5000 };
                     default 0;
+                }
+                %persistent bool H2eRequired {
+                    default 0;
+                }
+                %persistent bool SCSEnable {
+                    default 0;
+                }
+                /* Certification parameters ends here */
+                %persistent object Steering {
+                    on event "*" call whm_mxl_vendorSteering_setConf_ocf;
+
+                    /* Enable or disable 11V Diassociation Timer in BTM request */
+                    %persistent bool Ignore11vDiassoc {
+                        default 1;
+                    }
                 }
             }
         }
@@ -1396,8 +1418,6 @@
         filter 'path matches "WiFi\.AccessPoint\.[0-32]+\.Vendor\.+"';
     on event "dm:object-changed" call whm_mxl_rad_updateObssCoexistence
         filter 'path matches "WiFi\.Radio\.[0-9]+\." && (contains("parameters.ObssCoexistenceEnable"))';
-    on event "dm:object-changed" call whm_mxl_vap_updateSsidAdvertisement
-        filter 'path matches "WiFi\.AccessPoint\.[0-32]+\." && (contains("parameters.SSIDAdvertisementEnabled"))';
     on event "dm:object-changed" call whm_mxl_vap_updateMaxAssociatedDevices
         filter 'path matches "WiFi\.AccessPoint\.[0-32]+\." && (contains("parameters.MaxAssociatedDevices"))';
 }

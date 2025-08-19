@@ -23,14 +23,6 @@
 #endif /* CONFIG_VENDOR_MXL_PROPRIETARY */
 /* Macros Section */
 
-typedef enum {
-	TX_POWER_NONE = -1,
-	TX_POWER_RNR = 0,
-	TX_POWER_CURRENT,
-	TX_POWER_MAX,
-	TX_POWER_LAST,
-} mxl_txPower_type_e;
-
 /* Struct Definition Section */
 typedef struct {
     /**
@@ -83,6 +75,8 @@ typedef struct {
     int AcsFbPrimChan;
     int AcsFbSecChan;
     int AcsFbBw;
+    char* acs_exclusion_ch_list;
+    uint32_t acs_exclusion_list_count;
 #endif /* CONFIG_VENDOR_MXL_PROPRIETARY */
 } mxl_VendorData_t;
 
@@ -128,6 +122,7 @@ swl_rc_ne whm_mxl_rad_supvendModesChanged(T_Radio* pRad, T_AccessPoint* pAP, amx
 swl_rc_ne whm_mxl_rad_regDomain(T_Radio* pRad, char* val, int bufsize, int set);
 #ifdef CONFIG_VENDOR_MXL_PROPRIETARY
 int whm_mxl_rad_autoChannelEnable(T_Radio* pRad, int enable, int set);
+swl_rc_ne whm_mxl_rad_startPltfACS(T_Radio* pRad, const amxc_var_t* const args);
 #endif /* CONFIG_VENDOR_MXL_PROPRIETARY */
 swl_rc_ne whm_mxl_rad_setChanspec(T_Radio* pRad, bool direct);
 int8_t *whm_mxl_rad_txPercentToPower(uint8_t percent);

@@ -68,6 +68,15 @@ static swl_rc_ne whm_mxl_rad_acsUpdateConfigMap(T_Radio* pRad, mxl_VendorData_t*
         swl_mapCharFmt_addValInt32(configMap, "acs_6g_punct_mode", amxd_object_get_value(bool, acsObj, "Acs6gPunctMode", NULL));
     }
 
+    if (!swl_str_isEmpty(pRadVendor->acs_exclusion_ch_list)) {
+        swl_mapCharFmt_addValStr(configMap, "acs_exclude_opclass_ch_list", "%u %s",
+                                                pRadVendor->acs_exclusion_list_count,
+                                                pRadVendor->acs_exclusion_ch_list);
+    } else {
+        // In hostapd config, acs_exclude_opclass_ch_list is set as 0 0 then all channels are considered for ACS.
+        swl_mapCharFmt_addValStr(configMap, "acs_exclude_opclass_ch_list", "0 0");
+    }
+
     return SWL_RC_OK;
 }
 #endif /* CONFIG_VENDOR_MXL_PROPRIETARY */
@@ -414,9 +423,9 @@ static void  whm_mxl_rad_configCertification(T_Radio* pRad, amxd_object_t* pVend
     swl_mapCharFmt_addValInt32(configMap, "he_mac_a_msdu_in_ack_enabled_a_mpdu_support", amxd_object_get_value(bool, pVendorObj, "HeMacMsduAckEnabledMpduSupport", NULL));
     swl_mapCharFmt_addValInt32(configMap, "he_mac_maximum_a_mpdu_length_exponent", amxd_object_get_value(uint8_t, pVendorObj, "HeMacMaxAMpduLengthExponent", NULL));
     swl_mapCharFmt_addValInt32(configMap, "he_mac_om_control_support", amxd_object_get_value(bool, pVendorObj, "HeMacOmControlSupport", NULL));
-    swl_mapCharFmt_addValInt32(configMap, "ht_minimum_mpdu_start_spacing", amxd_object_get_value(bool, pVendorObj, "HtMinMpduStartSpacing", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "ht_minimum_mpdu_start_spacing", amxd_object_get_value(uint8_t, pVendorObj, "HtMinMpduStartSpacing", NULL));
     swl_mapCharFmt_addValInt32(configMap, "multibss_enable", amxd_object_get_value(bool, pVendorObj, "MultibssEnable", NULL));
-    swl_mapCharFmt_addValInt32(configMap, "he_phy_max_nc", amxd_object_get_value(bool, pVendorObj, "HePhyMacNc", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "he_phy_max_nc", amxd_object_get_value(uint32_t, pVendorObj, "HePhyMaxNc", NULL));
     swl_mapCharFmt_addValInt32(configMap, "sr_control_field_hesiga_spatial_reuse_value15_allowed", amxd_object_get_value(bool, pVendorObj, "SrCtrlHesigaSpatialReuseVal15", NULL));
     swl_mapCharFmt_addValInt32(configMap, "he_operation_cohosted_bss", amxd_object_get_value(bool, pVendorObj, "HeOperationCohostedBss", NULL));
 
@@ -449,22 +458,22 @@ static void  whm_mxl_rad_configCertification(T_Radio* pRad, amxd_object_t* pVend
     swl_mapCharFmt_addValInt32(configMap, "he_mu_edca_ac_be_aifsn", amxd_object_get_value(bool, pVendorObj, "HeMuEdcaAcBeAifsn", NULL));
     swl_mapCharFmt_addValInt32(configMap, "he_mu_edca_ac_be_ecwmin", amxd_object_get_value(int8_t, pVendorObj, "HeMuEdcaAcBeEcwmin", NULL));
     swl_mapCharFmt_addValInt32(configMap, "he_mu_edca_ac_be_ecwmax", amxd_object_get_value(int8_t, pVendorObj, "HeMuEdcaAcBeEcwmax", NULL));
-    swl_mapCharFmt_addValInt32(configMap, "he_mu_edca_ac_be_timer", amxd_object_get_value(int8_t, pVendorObj, "HeMuEdcaAcBeTimer", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "he_mu_edca_ac_be_timer", amxd_object_get_value(uint32_t, pVendorObj, "HeMuEdcaAcBeTimer", NULL));
     swl_mapCharFmt_addValInt32(configMap, "he_mu_edca_ac_bk_aifsn", amxd_object_get_value(bool, pVendorObj, "HeMuEdcaAcBkAifsn", NULL));
     swl_mapCharFmt_addValInt32(configMap, "he_mu_edca_ac_bk_aci", amxd_object_get_value(int8_t, pVendorObj, "HeMuEdcaAcBkAci", NULL));
     swl_mapCharFmt_addValInt32(configMap, "he_mu_edca_ac_bk_ecwmin", amxd_object_get_value(int8_t, pVendorObj, "HeMuEdcaAcBkEcwmin", NULL));
     swl_mapCharFmt_addValInt32(configMap, "he_mu_edca_ac_bk_ecwmax", amxd_object_get_value(int8_t, pVendorObj, "HeMuEdcaAcBkEcwmax", NULL));
-    swl_mapCharFmt_addValInt32(configMap, "he_mu_edca_ac_bk_timer", amxd_object_get_value(int8_t, pVendorObj, "HeMuEdcaAcBkTimer", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "he_mu_edca_ac_bk_timer", amxd_object_get_value(uint32_t, pVendorObj, "HeMuEdcaAcBkTimer", NULL));
     swl_mapCharFmt_addValInt32(configMap, "he_mu_edca_ac_vi_aifsn", amxd_object_get_value(bool, pVendorObj, "HeMuEdcaAcViAifsn", NULL));
     swl_mapCharFmt_addValInt32(configMap, "he_mu_edca_ac_vi_aci", amxd_object_get_value(int8_t, pVendorObj, "HeMuEdcaAcViAci", NULL));
     swl_mapCharFmt_addValInt32(configMap, "he_mu_edca_ac_vi_ecwmin", amxd_object_get_value(int8_t, pVendorObj, "HeMuEdcaAcViEcwmin", NULL));
     swl_mapCharFmt_addValInt32(configMap, "he_mu_edca_ac_vi_ecwmax", amxd_object_get_value(int8_t, pVendorObj, "HeMuEdcaAcViEcwmax", NULL));
-    swl_mapCharFmt_addValInt32(configMap, "he_mu_edca_ac_vi_timer", amxd_object_get_value(int8_t, pVendorObj, "HeMuEdcaAcViTimer", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "he_mu_edca_ac_vi_timer", amxd_object_get_value(uint32_t, pVendorObj, "HeMuEdcaAcViTimer", NULL));
     swl_mapCharFmt_addValInt32(configMap, "he_mu_edca_ac_vo_aifsn", amxd_object_get_value(bool, pVendorObj, "HeMuEdcaAcVoAifsn", NULL));
-    swl_mapCharFmt_addValInt32(configMap, "he_mu_edca_ac_vo_aci", amxd_object_get_value(int8_t, pVendorObj, "HeMuEdcaAcVoAci", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "he_mu_edca_ac_vo_aci", amxd_object_get_value(uint8_t, pVendorObj, "HeMuEdcaAcVoAci", NULL));
     swl_mapCharFmt_addValInt32(configMap, "he_mu_edca_ac_vo_ecwmin", amxd_object_get_value(int8_t, pVendorObj, "HeMuEdcaAcVoEcwmin", NULL));
     swl_mapCharFmt_addValInt32(configMap, "he_mu_edca_ac_vo_ecwmax", amxd_object_get_value(int8_t, pVendorObj, "HeMuEdcaAcVoEcwmax", NULL));
-    swl_mapCharFmt_addValInt32(configMap, "he_mu_edca_ac_vo_timer", amxd_object_get_value(int8_t, pVendorObj, "HeMuEdcaAcVoTimer", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "he_mu_edca_ac_vo_timer", amxd_object_get_value(uint32_t, pVendorObj, "HeMuEdcaAcVoTimer", NULL));
     swl_mapCharFmt_addValInt32(configMap, "enable_eht_debug_mode", amxd_object_get_value(bool, pVendorObj, "EnableEhtDebugMode", NULL));
     swl_mapCharFmt_addValInt32(configMap, "eht_mac_eht_om_control", amxd_object_get_value(bool, pVendorObj, "EhtMacEhtOmControl", NULL));
     swl_mapCharFmt_addValInt32(configMap, "eht_mac_restricted_twt", amxd_object_get_value(bool, pVendorObj, "EhtMacRestrictedTwt", NULL));
@@ -489,6 +498,9 @@ static void  whm_mxl_rad_configCertification(T_Radio* pRad, amxd_object_t* pVend
     swl_mapCharFmt_addValInt32(configMap, "eht_phy_common_nominal_pkt_pad", amxd_object_get_value(uint8_t, pVendorObj, "EhtPhyCommonNominalPktPad", NULL));
     swl_mapCharFmt_addValInt32(configMap, "sMaxMpduLen", amxd_object_get_value(int32_t, pVendorObj, "SetMaxMpduLen", NULL));
     swl_mapCharFmt_addValInt32(configMap, "advertise_ecsa_ie", amxd_object_get_value(bool, pVendorObj, "AdvertiseEcsaIe", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "sDynamicMuMinStationsInGroup", amxd_object_get_value(int8_t, pVendorObj, "SetDynamicMuMinStationsInGroup", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "sDynamicMuMaxStationsInGroup", amxd_object_get_value(int8_t, pVendorObj, "SetDynamicMuMaxStationsInGroup", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "sDynamicMuCdbConfig", amxd_object_get_value(int8_t, pVendorObj, "SetDynamicMuCdbConfig", NULL));
     if (wld_rad_is_24ghz(pRad)) {
 	    swl_mapCharFmt_addValInt32(configMap, "eht_mld_tsf_diff", amxd_object_get_value(int32_t, pVendorObj, "EhtMldTsfDiff", NULL));
     } else {
@@ -581,14 +593,11 @@ static void  whm_mxl_rad_configCertification(T_Radio* pRad, amxd_object_t* pVend
         swl_mapCharFmt_addValInt32(configMap, "eht_phy_non_ofdma_ul_mu_mimo_bw_80_mhz_or_below", amxd_object_get_value(bool, pVendorObj, "EhtPhyNonOfdmaMuMimo80MhzBelow", NULL));
         swl_mapCharFmt_addValInt32(configMap, "eht_phy_non_ofdma_ul_mu_mimo_bw_160_mhz", amxd_object_get_value(bool, pVendorObj, "EhtPhyNonOfdmaUlMuMimoBw160Mhz", NULL));
         swl_mapCharFmt_addValInt32(configMap, "eht_phy_non_ofdma_ul_mu_mimo_bw_320_mhz", amxd_object_get_value(bool, pVendorObj, "EhtPhyNonOfdmaUlMuMimoBw320Mhz", NULL));
-        swl_mapCharFmt_addValInt32(configMap, "sDynamicMuMinStationsInGroup=4", amxd_object_get_value(uint8_t, pVendorObj, "SetDynamicMuMinStationsInGroup", NULL));
-        swl_mapCharFmt_addValInt32(configMap, "sDynamicMuMaxStationsInGroup", amxd_object_get_value(uint8_t, pVendorObj, "SetDynamicMuMaxStationsInGroup", NULL));
-        swl_mapCharFmt_addValInt32(configMap, "sDynamicMuCdbConfig", amxd_object_get_value(uint8_t, pVendorObj, "SetDynamicMuCdbConfig", NULL));
         swl_mapCharFmt_addValInt32(configMap, "rnr_tbtt_mld_non_zero_pad", amxd_object_get_value(uint8_t, pVendorObj, "RnrTbttMldNonZeroPad", NULL));
     }
 }
 
-static swl_rc_ne s_mxl_rad_configObssScanParams(amxd_object_t* pVendorObj, swl_mapChar_t* configMap)
+static swl_rc_ne s_mxl_rad_configObssScanParams(amxd_object_t* pVendorObj, swl_mapChar_t* configMap, bool coexistanceEnabled)
 {
     amxd_object_t* obssObj = amxd_object_get(pVendorObj, "ObssScanParams");
     ASSERT_NOT_NULL(obssObj, SWL_RC_ERROR, ME, "No ObssScanParams vendor obj");
@@ -600,8 +609,12 @@ static swl_rc_ne s_mxl_rad_configObssScanParams(amxd_object_t* pVendorObj, swl_m
     uint32_t channelTransitionDelayFactor = amxd_object_get_value(uint32_t, obssObj, "ChannelTransitionDelayFactor", NULL);
     uint32_t scanActivityThreshold        = amxd_object_get_value(uint32_t, obssObj, "ScanActivityThreshold",        NULL);
 
-    /* Configure OBSS Interval */
-    swl_mapCharFmt_addValInt32(configMap, "obss_interval", amxd_object_get_value(int32_t, obssObj, "ObssInterval", NULL));
+    /* Configure OBSS Interval
+           If obss coexistance is enabled then obssInterval = value from DM
+       otherwise value is set explicitly to 0
+    */
+    int obssInterval = amxd_object_get_value(int32_t, obssObj, "ObssInterval", NULL);
+    swl_mapCharFmt_addValInt32(configMap, "obss_interval", (coexistanceEnabled ? obssInterval : 0));
 
     /* OBSS Scan Params */
     WHM_MXL_NE_SET_PARAM(scanPassiveDwell,             DEF_SCAN_PASSIVE_DWELL,           configMap, "scan_passive_dwell");
@@ -720,9 +733,7 @@ static swl_rc_ne s_mxl_rad_updateConfig(T_Radio* pRad, mxl_VendorData_t* pRadVen
 
     /* 2.4G Band Only Parameters */
     if (wld_rad_is_24ghz(pRad)) {
-        if (pRad->obssCoexistenceEnabled) {
-            s_mxl_rad_configObssScanParams(pVendorObj, configMap);
-        }
+        s_mxl_rad_configObssScanParams(pVendorObj, configMap, pRad->obssCoexistenceEnabled);
         if (wld_rad_checkEnabledRadStd(pRad, SWL_RADSTD_N)) {
             swl_mapCharFmt_addValInt32(configMap, "sQAMplus", amxd_object_get_value(bool, pVendorObj, "SetQAMplus", NULL));
         }
@@ -813,6 +824,7 @@ static swl_rc_ne s_mxl_rad_updateConfig(T_Radio* pRad, mxl_VendorData_t* pRadVen
     /* Certification Params*/
     if (whm_mxl_isCertModeEnabled()) {
         whm_mxl_rad_configCertification(pRad, pVendorObj, configMap);
+        swl_mapCharFmt_addValInt32(configMap, "max_bss", max_bss);
     }
 
     SAH_TRACEZ_OUT(ME);
@@ -945,13 +957,13 @@ static void s_whm_mxl_vap_securityConfig(T_AccessPoint* pAP, swl_mapChar_t* conf
                     SAH_TRACEZ_INFO(ME, "%s Set sae_pwe",pAP->alias);
                     swl_mapCharFmt_addValStr(configMap, "sae_pwe", "%s", "2");
                 }
-                if(whm_mxl_isCertModeEnabled() && wld_rad_checkEnabledRadStd(pAP->pRadio, SWL_RADSTD_BE)) {
+                if(whm_mxl_isCertModeEnabled()) {
                     /*
                     * Overriding the rsn_pairwise and wpa_pairwise as one of the
                     * test case is failing in checking for the suite count to be 1
                     * So this is a workaround till WFA updates their sniffer validation checks
                     */
-                    if(!whm_mxl_isWpa3CertModeEnabled()) {
+                    if(!whm_mxl_isWpa3CertModeEnabled() && wld_rad_checkEnabledRadStd(pAP->pRadio, SWL_RADSTD_BE)) {
                         SAH_TRACEZ_INFO(ME, "%s Overriding the wpa_pairwise and rsn_pairwise",pAP->alias);
                         swl_mapChar_delete(configMap, "rsn_pairwise");
                         swl_mapChar_delete(configMap, "wpa_pairwise");
@@ -963,14 +975,27 @@ static void s_whm_mxl_vap_securityConfig(T_AccessPoint* pAP, swl_mapChar_t* conf
                     * So that the AP-MLD formed between the 2.4GHz + 6GHZ and 5GHZ + 6GHz
                     * Can come up without issue
                     */
-                    SAH_TRACEZ_INFO(ME, "%s Set sae_pwe",pAP->alias);
-                    swl_mapCharFmt_addValStr(configMap, "sae_pwe", "%s", "1");
+                    if(wld_rad_checkEnabledRadStd(pAP->pRadio, SWL_RADSTD_BE) ||
+                      (pAP->pRadio->operatingFrequencyBand == SWL_FREQ_BAND_EXT_6GHZ) ||
+                      (mxlVapVendorData->h2eRequired)) {
+                        SAH_TRACEZ_INFO(ME, "%s Set sae_pwe",pAP->alias);
+                        swl_mapCharFmt_addValStr(configMap, "sae_pwe", "%s", "1");
+                    }
                 }
             }
             /* Overwrite wpa_key_mgmt to SAE-EXT-KEY to support AKM24 */
             if(mxlVapVendorData->saeExtKey) {
                 swl_mapCharFmt_addValStr(configMap, "wpa_key_mgmt", "%s", "SAE-EXT-KEY");
-            }
+                whm_mxl_vap_wpaKeyMgmt(pAP, "SAE-EXT-KEY");
+            } else {
+                whm_mxl_vap_wpaKeyMgmt(pAP, wld_rad_checkEnabledRadStd(pAP->pRadio, SWL_RADSTD_BE) ? (pAP -> IEEE80211rEnable ?
+                        "SAE SAE-EXT-KEY FT-SAE FT-SAE-EXT-KEY" :
+                        "SAE SAE-EXT-KEY") :
+                    (pAP -> IEEE80211rEnable ?
+                        "SAE FT-SAE" :
+                        "SAE")
+                    );
+                }
             break;
         case SWL_SECURITY_APMODE_OWE:
             if(mxlVapVendorData && !swl_str_isEmpty(mxlVapVendorData->OWETransBSSID)) {
@@ -980,6 +1005,7 @@ static void s_whm_mxl_vap_securityConfig(T_AccessPoint* pAP, swl_mapChar_t* conf
                 /* Hostapd requires OWE Tranisiton SSID to be included in double quotes */
                 swl_mapCharFmt_addValStr(configMap, "owe_transition_ssid", "\"%s\"", mxlVapVendorData->OWETransSSID);
             }
+            whm_mxl_vap_wpaKeyMgmt(pAP, "OWE");
             break;
         case SWL_SECURITY_APMODE_NONE:
             if(mxlVapVendorData && !swl_str_isEmpty(mxlVapVendorData->OWETransBSSID)) {
@@ -1006,65 +1032,38 @@ static void s_whm_mxl_vap_securityConfig(T_AccessPoint* pAP, swl_mapChar_t* conf
             break;
     }
 
-    // Configure in WPA3 Personal Compatibility Mode
+    // Set Security mode as WPA3 Personal Compatibility
     if (mxlVapVendorData->EnableWPA3PersonalCompatibility == true) {
-        // Restore below parameters from AP config.
+        // Restore parameters from VAP data.
+        swl_mapCharFmt_addValInt32(configMap, "wpa_group_rekey", pAP->rekeyingInterval);
+        swl_mapCharFmt_addValStr(configMap, "wpa_ptk_rekey", "%s", "0");
         swl_mapCharFmt_addValStr(configMap, "wpa_passphrase", "%s", pAP->keyPassPhrase);
         if(!swl_str_isEmpty(pAP->saePassphrase)) {
-            swl_mapChar_add(configMap, "sae_password", pAP->saePassphrase);
+            swl_mapCharFmt_addValStr(configMap, "sae_password", "%s", pAP->saePassphrase);
         }
-        swl_mapCharFmt_addValInt32(configMap, "wpa_group_rekey", pAP->rekeyingInterval);
-        swl_mapChar_add(configMap, "wpa_ptk_rekey", "0");
 
-        // Clear existing Security Configuration that might conflict with this mode.
-        swl_mapChar_delete(configMap, "wpa");
-        swl_mapChar_delete(configMap, "wpa_key_mgmt");
-        swl_mapChar_delete(configMap, "rsn_pairwise");
-        swl_mapChar_delete(configMap, "group_cipher");
-        swl_mapChar_delete(configMap, "ieee80211w");
-        swl_mapChar_delete(configMap, "sae_pwe");
-        swl_mapChar_delete(configMap, "sae_require_mfp");
-        swl_mapChar_delete(configMap, "rsn_override_key_mgmt");
-        swl_mapChar_delete(configMap, "rsn_override_pairwise");
-        swl_mapChar_delete(configMap, "rsn_override_mfp");
-        swl_mapChar_delete(configMap, "rsn_override_key_mgmt_2");
-        swl_mapChar_delete(configMap, "rsn_override_pairwise_2");
-        swl_mapChar_delete(configMap, "rsn_override_mfp_2");
-
-        // Set Defaults for this mode
-        if (pAP->pRadio->operatingFrequencyBand == SWL_FREQ_BAND_EXT_2_4GHZ || pAP->pRadio->operatingFrequencyBand == SWL_FREQ_BAND_EXT_5GHZ) {
-            swl_mapCharFmt_addValStr(configMap, "wpa", "%s", "2");
+        // Set common defaults
+        swl_mapCharFmt_addValStr(configMap, "wpa", "%s", "2");
+        swl_mapCharFmt_addValStr(configMap, "rsn_pairwise", "%s", "CCMP");
+        swl_mapCharFmt_addValStr(configMap, "group_cipher", "%s", "CCMP");
+        swl_mapCharFmt_addValStr(configMap, "sae_pwe", "%s", "1");
+        swl_mapCharFmt_addValStr(configMap, "sae_require_mfp", "%s", "1");
+        swl_mapCharFmt_addValStr(configMap, "rsn_override_key_mgmt_2", "%s", "SAE-EXT-KEY");
+        swl_mapCharFmt_addValStr(configMap, "rsn_override_pairwise_2", "%s", "GCMP-256");
+        swl_mapCharFmt_addValStr(configMap, "rsn_override_mfp_2", "%s", "2");
+ 
+        // Set band specific defaults
+        if (pAP->pRadio->operatingFrequencyBand == SWL_FREQ_BAND_EXT_2_4GHZ ||
+            pAP->pRadio->operatingFrequencyBand == SWL_FREQ_BAND_EXT_5GHZ) {
             swl_mapCharFmt_addValStr(configMap, "wpa_key_mgmt", "%s", "WPA-PSK");
-            swl_mapCharFmt_addValStr(configMap, "rsn_pairwise", "%s", "CCMP");
-            swl_mapCharFmt_addValStr(configMap, "group_cipher", "%s", "CCMP");
             swl_mapCharFmt_addValStr(configMap, "ieee80211w", "%s", "0");
             swl_mapCharFmt_addValStr(configMap, "rsn_override_key_mgmt", "%s", "SAE");
             swl_mapCharFmt_addValStr(configMap, "rsn_override_pairwise", "%s", "CCMP");
             swl_mapCharFmt_addValStr(configMap, "rsn_override_mfp", "%s", "2");
-            swl_mapCharFmt_addValStr(configMap, "rsn_override_key_mgmt_2", "%s", "SAE-EXT-KEY");
-            swl_mapCharFmt_addValStr(configMap, "rsn_override_pairwise_2", "%s", "GCMP-256");
-            swl_mapCharFmt_addValStr(configMap, "rsn_override_mfp_2", "%s", "2");
-        }
-        else if (pAP->pRadio->operatingFrequencyBand == SWL_FREQ_BAND_EXT_6GHZ) {
-            swl_mapCharFmt_addValStr(configMap, "wpa", "%s", "2");
+        } else if (pAP->pRadio->operatingFrequencyBand == SWL_FREQ_BAND_EXT_6GHZ) {
             swl_mapCharFmt_addValStr(configMap, "wpa_key_mgmt", "%s", "SAE");
-            swl_mapCharFmt_addValStr(configMap, "rsn_pairwise", "%s", "CCMP");
-            swl_mapCharFmt_addValStr(configMap, "group_cipher", "%s", "CCMP");
             swl_mapCharFmt_addValStr(configMap, "ieee80211w", "%s", "2");
-            swl_mapCharFmt_addValStr(configMap, "sae_pwe", "%s", "1");
-            swl_mapCharFmt_addValStr(configMap, "sae_require_mfp", "%s", "1");
-            swl_mapCharFmt_addValStr(configMap, "rsn_override_key_mgmt_2", "%s", "SAE-EXT-KEY");
-            swl_mapCharFmt_addValStr(configMap, "rsn_override_pairwise_2", "%s", "GCMP-256");
-            swl_mapCharFmt_addValStr(configMap, "rsn_override_mfp_2", "%s", "2");
         }
-    } else {
-        // Remove remnants of WPA3 Personal Compatibility Mode.
-        swl_mapChar_delete(configMap, "rsn_override_key_mgmt");
-        swl_mapChar_delete(configMap, "rsn_override_pairwise");
-        swl_mapChar_delete(configMap, "rsn_override_mfp");
-        swl_mapChar_delete(configMap, "rsn_override_key_mgmt_2");
-        swl_mapChar_delete(configMap, "rsn_override_pairwise_2");
-        swl_mapChar_delete(configMap, "rsn_override_mfp_2");
     }
 
     SAH_TRACEZ_OUT(ME);
@@ -1130,6 +1129,21 @@ static void whm_mxl_vap_configCertification(T_AccessPoint* pAP, amxd_object_t* p
     swl_mapCharFmt_addValInt32(configMap, "tx_queue_data3_aifs", amxd_object_get_value(int32_t, pVendorObj, "TxQueueBKAifs", NULL));
     WHM_MXL_NE_SET_PARAM(amxd_object_get_value(int32_t, pVendorObj, "GasCBDelay", NULL), 0, configMap, "gas_comeback_delay");
     WHM_MXL_NE_SET_PARAM(amxd_object_get_value(bool, pVendorObj, "EhtMacEpcsPrioAccess", NULL), 0, configMap, "eht_mac_epcs_prio_access");
+    WHM_MXL_NE_SET_PARAM(amxd_object_get_value(bool, pVendorObj, "SCSEnable", NULL), 0, configMap, "scs_enable");
+}
+
+static void s_whm_mxl_vap_steeringConfig(T_AccessPoint* pAP, swl_mapChar_t* configMap){
+    mxl_VapVendorData_t* mxlVapVendorData = mxl_vap_getVapVendorData(pAP);
+    ASSERTS_NOT_NULL(mxlVapVendorData, , ME, "mxlVapVendorData is NULL");
+    /* For certification,
+        ignore_da_timer is explicitly set to false,
+        otherwise value is from internal variable updated from DM.
+    */
+    if (whm_mxl_isCertModeEnabled()) {
+        swl_mapCharFmt_addValInt32(configMap, "ignore_da_timer", false);
+    } else {
+        swl_mapCharFmt_addValInt32(configMap, "ignore_da_timer", mxlVapVendorData->ignore11vDiassoc);
+    }
 }
 
 static swl_rc_ne s_mxl_vap_updateConfig(T_AccessPoint* pAP, swl_mapChar_t* configMap) {
@@ -1146,6 +1160,7 @@ static swl_rc_ne s_mxl_vap_updateConfig(T_AccessPoint* pAP, swl_mapChar_t* confi
     int32_t numResSta = amxd_object_get_value(int32_t, pVendorObj, "NumResSta", NULL);
     bool vendorVht = amxd_object_get_value(bool, pVendorObj, "VendorVht", NULL);
     bool disablePbac = amxd_object_get_value(bool, pVendorObj, "DisablePbac", NULL);
+    bool bssLoadIe = amxd_object_get_value(bool, pVendorObj, "EnableBssLoad", NULL);
 
     /* Configure parameters */
     /* Beacon parameters */
@@ -1187,6 +1202,7 @@ static swl_rc_ne s_mxl_vap_updateConfig(T_AccessPoint* pAP, swl_mapChar_t* confi
     WHM_MXL_NE_SET_PARAM(amxd_object_get_value(uint32_t, pVendorObj, "SetBridgeMode", NULL), 0, configMap, "sBridgeMode");
     WHM_MXL_NE_SET_PARAM(disablePbac, 0, configMap, "disable_pbac");
     WHM_MXL_NE_SET_PARAM(amxd_object_get_value(uint32_t, pVendorObj, "MboCellAware", NULL), 1, configMap, "mbo_cell_aware");
+    swl_mapCharFmt_addValInt32(configMap, "enable_bss_load_ie", bssLoadIe);
     /* Soft Block parameters */
     whm_mxl_vap_softBlockConfig(pAP, pVendorObj, configMap);
     /* Security Parameters */
@@ -1201,6 +1217,8 @@ static swl_rc_ne s_mxl_vap_updateConfig(T_AccessPoint* pAP, swl_mapChar_t* confi
       /* Disable Beacon Protection is only supported for 11be */
       swl_mapCharFmt_addValInt32(configMap, "disable_beacon_prot", amxd_object_get_value(bool, pVendorObj, "DisableBeaconProtection", NULL));
     }
+    /* Steering parameters */
+    s_whm_mxl_vap_steeringConfig(pAP, configMap);
 
     /* Certification Params*/
     if (whm_mxl_isCertModeEnabled()) {

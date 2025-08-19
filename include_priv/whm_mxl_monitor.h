@@ -35,21 +35,22 @@ typedef struct nastaData {
     amxc_llist_t scanList;
 } mxl_nastaData_t;
 
-void mxl_monitor_init(T_Radio* pRad);
-void mxl_monitor_deinit(T_Radio* pRad);
-int mxl_monitor_getStaScanTimeOut(T_Radio* pRad);
-int mxl_monitor_setStaScanTimeOut(T_Radio* pRad, uint32_t scanTime);
+void whm_mxl_monitor_init(T_Radio* pRad);
+void whm_mxl_monitor_deinit(T_Radio* pRad);
+int whm_mxl_monitor_getStaScanTimeOut(T_Radio* pRad);
+int whm_mxl_monitor_setStaScanTimeOut(T_Radio* pRad, uint32_t scanTime);
 
 int whm_mxl_monitor_setupStamon(T_Radio* pRad, bool enable);
 int whm_mxl_monitor_updateMonStats(T_Radio* pRad);
 int whm_mxl_monitor_updateNaStaObj(T_Radio* pRad);
+swl_rc_ne whm_mxl_monitor_addStaMon(T_Radio* pRad, T_NonAssociatedDevice* pMD);
 int whm_mxl_monitor_delStamon(T_Radio* pRad, T_NonAssociatedDevice* pMD);
 
-mxl_nastaEntryData_t* mxl_monitor_fetchRunNaStaEntry(T_Radio* pRad, swl_macBin_t* pStaMac);
-mxl_nastaEntryData_t* mxl_monitor_addRunNaStaEntry(T_Radio* pRad, swl_macBin_t* pStaMac);
-void mxl_monitor_delRunNaStaEntry(mxl_nastaEntryData_t* pEntry);
-void mxl_monitor_dropAllRunNaStaEntries(T_Radio* pRad);
-void mxl_monitor_checkRunNaStaList(T_Radio* pRad);
-uint32_t mxl_monitor_getRunNaStaEntryCount(T_Radio* pRad);
+mxl_nastaEntryData_t* whm_mxl_monitor_fetchRunNaStaEntry(T_Radio* pRad, swl_macBin_t* pStaMac);
+mxl_nastaEntryData_t* whm_mxl_monitor_addRunNaStaEntry(T_Radio* pRad, swl_macBin_t* pStaMac);
+void whm_mxl_monitor_delRunNaStaEntry(mxl_nastaEntryData_t* pEntry);
+void whm_mxl_monitor_dropAllRunNaStaEntries(T_Radio* pRad);
+void whm_mxl_monitor_checkRunNaStaList(T_Radio* pRad);
+uint32_t whm_mxl_monitor_getRunNaStaEntryCount(T_Radio* pRad);
 
 #endif /* __WHM_MXL_MONITOR_H__ */

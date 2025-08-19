@@ -34,7 +34,7 @@ static swl_rc_ne s_whm_mxl_ep_updateGlobalConfig(T_EndPoint* pEP, wld_wpaSupp_co
     char* vendorElems       = amxd_object_get_value(cstring_t, pEpVendorObj, "VendorElements", NULL);
 
     if(!(swl_str_isEmpty(vendorElems))) {
-        swl_mapCharFmt_addValStr(global, "vendor_elements", "%s", vendorElems);
+        swl_mapCharFmt_addValStr(global, "vendor_elems", "%s", vendorElems);
     }
     free(vendorElems);
 

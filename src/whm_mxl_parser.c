@@ -36,7 +36,15 @@
 
 #define ME "mxlPars"
 
-swl_rc_ne mxl_parseNaStaEvt(T_Radio* pRad, struct nlattr* tb[]) {
+const char* s_reqToStr(uint8_t reqType) {
+    switch (reqType) {
+        case NASTA_STATS_REQ_ASYNC: return "async";
+        case NASTA_STATS_REQ_SYNC: return "sync";
+        default: return "unknown";
+    }
+}
+
+swl_rc_ne mxl_parseNaStaStats(T_Radio* pRad, struct nlattr* tb[], uint8_t reqType, bool syncDm) {
     ASSERT_NOT_NULL(pRad, SWL_RC_INVALID_PARAM, ME, "NULL");
     ASSERT_NOT_NULL(tb, SWL_RC_INVALID_PARAM, ME, "NULL");
     void* data = NULL;
@@ -50,7 +58,10 @@ swl_rc_ne mxl_parseNaStaEvt(T_Radio* pRad, struct nlattr* tb[]) {
     T_NonAssociatedDevice* pMD = wld_rad_staMon_getNonAssociatedDevice(pRad, nastaMacStr.cMac);
     ASSERTS_NOT_NULL(pMD, SWL_RC_OK, ME, "%s: unknown nasta mac %s", pRad->Name, nastaMacStr.cMac);
 
-    SAH_TRACEZ_INFO(ME, "%s: received nasta event for %s", pRad->Name, nastaMacStr.cMac);
+    SAH_TRACEZ_INFO(ME, "%s: received %s nasta event for %s", pRad->Name,
+                                                    s_reqToStr(reqType),
+                                                    nastaMacStr.cMac);
+
     uint16_t curRate = nasta->rate;
     int16_t bestRssi = -200;
     for(uint32_t i = 0; i < SWL_ARRAY_SIZE(nasta->rssi); i++) {
@@ -66,12 +77,14 @@ swl_rc_ne mxl_parseNaStaEvt(T_Radio* pRad, struct nlattr* tb[]) {
     }
     SAH_TRACEZ_INFO(ME, "%s: %s bestRssi %d, savedRssi %d, rate %dMbps", pRad->Name, nastaMacStr.cMac, bestRssi, pMD->SignalStrength, curRate);
 
-    whm_mxl_monitor_updateNaStaObj(pRad);
+    if (syncDm) {
+        whm_mxl_monitor_updateNaStaObj(pRad);
+    }
 
-    mxl_nastaEntryData_t* pEntry = mxl_monitor_fetchRunNaStaEntry(pRad, (swl_macBin_t*) nasta->addr);
+    mxl_nastaEntryData_t* pEntry = whm_mxl_monitor_fetchRunNaStaEntry(pRad, (swl_macBin_t*) nasta->addr);
     if(pEntry) {
         SAH_TRACEZ_INFO(ME, "del executed runNaSta entry %s", nastaMacStr.cMac);
-        mxl_monitor_delRunNaStaEntry(pEntry);
+        whm_mxl_monitor_delRunNaStaEntry(pEntry);
     }
 
     return SWL_RC_OK;

@@ -49,12 +49,16 @@ typedef struct {
     char GroupMgmtCipher[MAX_NUM_OF_DIGITS];
     /* Setting Group Cipher */
     char GroupCipher[MAX_NUM_OF_DIGITS];
-    /* Radius Secret Password for Enterprise Security modes*/
+    /* Radius Secret Password for Enterprise Security modes */
     char radiusSecretKey[70];
     /* Enable sync timer */
     amxp_timer_t* onVapEnableSyncTimer;
     /* VAP on enable reload pending status */
     bool vapEnableReloadPending;
+    /* For Certification H2E is mandated for sae_pwe */
+    bool h2eRequired;
+    /* Enable or Disable ignoring of 11vDiassoc timer */
+    bool ignore11vDiassoc;
 } mxl_VapVendorData_t;
 
 /* Macros Section */
@@ -69,6 +73,7 @@ int whm_mxl_vap_getStationStats(T_AccessPoint* pAP);
 int whm_mxl_vap_updateApStats(T_AccessPoint* pAP);
 int whm_mxl_vap_enable(T_AccessPoint* pAP, int enable, int set);
 int whm_mxl_vap_ssid(T_AccessPoint* pAP, char* buf, int bufsize, int set);
+int whm_mxl_vap_wps_enable(T_AccessPoint* pAP, int enable, int set);
 int whm_mxl_vap_bssid(T_Radio* pR, T_AccessPoint* pAP, unsigned char* buf, int bufsize, int set);
 int whm_mxl_vap_sec_sync(T_AccessPoint* pAP, int set);
 int whm_mxl_vap_multiap_update_type(T_AccessPoint* pAP);
@@ -83,5 +88,6 @@ swl_rc_ne whm_mxl_vap_postUpActions(T_AccessPoint* pAP);
 swl_rc_ne whm_mxl_vap_postDownActions(T_AccessPoint* pAP);
 void whm_mxl_registerToWdsEvent(void);
 void whm_mxl_unregisterToWdsEvent(void);
+swl_rc_ne whm_mxl_vap_wpaKeyMgmt (T_AccessPoint* pAP, const char* paramValue);
 
 #endif /* __WHM_MXL_VAP_H__ */

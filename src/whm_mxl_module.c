@@ -187,6 +187,7 @@ bool whm_mxl_module_init(void) {
     fta.mfn_wrad_beamforming = whm_mxl_rad_beamforming;
     fta.mfn_wrad_update_mon_stats = whm_mxl_monitor_updateMonStats;
     fta.mfn_wrad_setup_stamon = whm_mxl_monitor_setupStamon;
+    fta.mfn_wrad_add_stamon = whm_mxl_monitor_addStaMon;
     fta.mfn_wrad_del_stamon = whm_mxl_monitor_delStamon;
     fta.mfn_wrad_start_scan = whm_mxl_rad_startScan;
     fta.mfn_wifi_supvend_modes = whm_mxl_rad_supvendModesChanged;
@@ -198,6 +199,7 @@ bool whm_mxl_module_init(void) {
     fta.mfn_wrad_updateConfigMap = whm_mxl_rad_updateConfigMap;
 #ifdef CONFIG_VENDOR_MXL_PROPRIETARY
     fta.mfn_wrad_autochannelenable = whm_mxl_rad_autoChannelEnable;
+    fta.mfn_wrad_startPltfACS = whm_mxl_rad_startPltfACS;
 #endif /* CONFIG_VENDOR_MXL_PROPRIETARY */
     fta.mfn_wrad_setChanspec = whm_mxl_rad_setChanspec;
     fta.mfn_wrad_radio_status = whm_mxl_rad_status;
@@ -216,6 +218,7 @@ bool whm_mxl_module_init(void) {
     fta.mfn_wvap_destroy_hook = whm_mxl_vap_destroyHook;
     fta.mfn_wvap_enable = whm_mxl_vap_enable;
     fta.mfn_wvap_ssid = whm_mxl_vap_ssid;
+    fta.mfn_wvap_wps_enable = whm_mxl_vap_wps_enable;
     fta.mfn_wvap_bssid = whm_mxl_vap_bssid;
     fta.mfn_wvap_sec_sync = whm_mxl_vap_sec_sync;
     fta.mfn_wvap_get_station_stats = whm_mxl_vap_getStationStats;
