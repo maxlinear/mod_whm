@@ -886,6 +886,22 @@ static void s_setSubBandDFS_pwf(void* priv _UNUSED, amxd_object_t* object, amxd_
     SAH_TRACEZ_OUT(ME);
 }
 
+static void s_setEnable80211BeOverride_pwf(void* priv _UNUSED, amxd_object_t* object, amxd_param_t* param _UNUSED, const amxc_var_t* const newParamValues) {
+    SAH_TRACEZ_IN(ME);
+    /* WiFi.Radio.{}.Vendor */
+    amxd_object_t* radObj = amxd_object_get_parent(object);
+    T_Radio* pRad = wld_rad_fromObj(radObj);
+    ASSERT_NOT_NULL(pRad, , ME, "No Radio Mapped");
+    mxl_VendorData_t* pRadVendor = mxl_rad_getVendorData(pRad);
+    ASSERT_NOT_NULL(pRadVendor, , ME, "pRadVendor NULL");
+
+    pRadVendor->enable80211BeOverride = amxc_var_dyncast(bool, newParamValues);
+    SAH_TRACEZ_INFO(ME, "%s: enable80211BeOverride set as %d", pRad->Name, pRadVendor->enable80211BeOverride);
+    wld_rad_doSync(pRad);
+
+    SAH_TRACEZ_OUT(ME);
+}
+
 static void s_setTwtResponderSupport_pwf(void* priv _UNUSED, amxd_object_t* object, amxd_param_t* param, const amxc_var_t* const newParamValues) {
     SAH_TRACEZ_IN(ME);
     /* WiFi.Radio.{}.Vendor */
@@ -1142,6 +1158,7 @@ SWLA_DM_HDLRS(sRadVendorDmHdlrs,
                   SWLA_DM_PARAM_HDLR("ZwdfsDebugChan", s_setZwdfsDebugChan_pwf),
 #endif /* CONFIG_VENDOR_MXL_PROPRIETARY */
                   SWLA_DM_PARAM_HDLR("SubBandDFS", s_setSubBandDFS_pwf),
+                  SWLA_DM_PARAM_HDLR("Enable80211BeOverride", s_setEnable80211BeOverride_pwf),
                   SWLA_DM_PARAM_HDLR("TwtResponderSupport", s_setTwtResponderSupport_pwf),
                   SWLA_DM_PARAM_HDLR("HeMacTwtResponderSupport", s_setHeMacTwtResponderSupport_pwf),
                   SWLA_DM_PARAM_HDLR("DynamicEdca", s_setRadioBoolVendorParam_pwf),
@@ -1633,7 +1650,7 @@ swl_rc_ne whm_mxl_rad_startPltfACS(T_Radio* pRad , const amxc_var_t* const args)
     bool radioIsAlive = wld_rad_isActive(pRad);
 
     amxc_var_t* variant = GET_ARG(args, "acs_list");
-    if (variant == NULL) {
+    if (variant == NULL || (variant->type_id == AMXC_VAR_ID_LIST && amxc_llist_size(&variant->data.vl) == 0)) {
         SAH_TRACEZ_INFO(ME, "%s: ACS Exclude OpClass/Channel list is empty, unsetting ACS exclusion channel list", pRad->Name);
         if (ctrlIfaceReady && radioIsAlive) {
             whm_mxl_hostapd_sendCommand(masterVap, "ACS_EX_OP_LIST 0 0", "Unset ACS exclusion channel list");
@@ -1743,20 +1760,45 @@ int whm_mxl_rad_autoChannelEnable(T_Radio* pRad, int enable, int set) {
             whm_mxl_hostapd_sendCommand(primaryVap, "RESET_ACS_STATE", "Reset ACS state");
             wld_rad_hostapd_setChannel(pRad);
         }
-
-        /* 6GHz may do multiple scans, and also pWHM may issue update_beacon via ctrl
-         * iface during the scans. Currently MXL ACS cannot handle such scenarious
-         * correctly during hostapd Toggle, therefore trigger restart of hostapd for 6GHz */
-        if (enable && wld_rad_is_6ghz(pRad))
-            whm_mxl_restartHapd(pRad);
-        else
-            wld_rad_doSync(pRad);
+        wld_rad_doSync(pRad);
     } else {
         ret = pRad->autoChannelEnable;
     }
 
     SAH_TRACEZ_OUT(ME);
     return ret;
+}
+
+static void s_disableAcsBootChannel(T_Radio* pRad) {
+    SAH_TRACEZ_IN(ME);
+    ASSERT_NOT_NULL(pRad, , ME, "pRad is NULL");
+    ASSERT_TRUE(pRad->hasDmReady, ,ME, "%s: dm not ready", pRad->Name);
+    ASSERT_NOT_NULL(pRad->pBus, , ME, "pBus is NULL");
+    if (pRad->acsBootChannel != -1) {
+        amxd_object_t* chanMgtObj = amxd_object_findf(pRad->pBus, "ChannelMgt");
+        ASSERT_NOT_NULL(chanMgtObj, , ME, "chanMgtObj is NULL");
+        amxd_trans_t trans;
+        ASSERT_TRANSACTION_INIT(chanMgtObj, &trans, , ME, "%s : trans init failure", pRad->Name);
+        amxd_trans_set_int32_t(&trans, "AcsBootChannel", -1);
+        ASSERT_TRANSACTION_LOCAL_DM_END(&trans, , ME, "%s : trans apply failure", pRad->Name);
+    }
+    SAH_TRACEZ_OUT(ME);
+}
+
+void _whm_mxl_rad_updateAcsBootChannel(const char* const sig_name _UNUSED,
+                                       const amxc_var_t* const data,
+                                       void* const priv _UNUSED) {
+    SAH_TRACEZ_IN(ME);
+    /* WiFi.Radio.{}.ChannelMgt */
+    amxd_object_t* mgtObject = amxd_dm_signal_get_object(get_wld_plugin_dm(), data);
+    ASSERTS_NOT_NULL(mgtObject, , ME, "mgtObject is NULL");
+    amxd_object_t* radObject = amxd_object_get_parent(mgtObject);
+    ASSERTS_NOT_NULL(radObject, , ME, "radObject is NULL");
+    T_Radio* pRad = wld_rad_fromObj(radObject);
+    ASSERT_NOT_NULL(pRad, , ME, "pRad is NULL");
+    SAH_TRACEZ_INFO(ME, "%s: Schedule disable AcsBootChannel", pRad->Name);
+    swla_delayExec_addTimeout((swla_delayExecFun_cbf) s_disableAcsBootChannel, pRad, DM_EVENT_HOOK_TIMEOUT_MS);
+    SAH_TRACEZ_OUT(ME);
 }
 #endif /* CONFIG_VENDOR_MXL_PROPRIETARY */
 
@@ -2049,4 +2091,22 @@ swl_rc_ne whm_mxl_rad_getMaxTxPowerdBm(T_Radio* pRad, uint16_t channel, int32_t*
     SAH_TRACEZ_INFO(ME, "%s: Received Max Tx Power of %d for channel %d", pRad->Name, *dbm, channel);
 
     return SWL_RC_OK;
+}
+
+/**
+ * @brief Checks if the radio needs to force-enable 802.11be mode
+ *
+ * @note Ideally, this should be handled by pWHM. This won't be necessary once
+ * MxL aligns with pWHM's approach to handling BE mode and MLO.
+ *
+ * @param T_Radio* rad pointer to the radio
+ * @return bool true if BE mode should be enabled, false otherwise.
+ */
+bool whm_mxl_rad_checkForceEnableBe(T_Radio* pRad) {
+    ASSERT_NOT_NULL(pRad, SWL_RC_INVALID_PARAM, ME, "NULL");
+    mxl_VendorData_t* pRadVendor = mxl_rad_getVendorData(pRad);
+    ASSERT_NOT_NULL(pRadVendor, SWL_RC_INVALID_PARAM, ME, "pRadVendor is NULL");
+    bool isRadBeEnabled = wld_rad_checkEnabledRadStd(pRad, SWL_RADSTD_BE);
+
+    return isRadBeEnabled && pRadVendor->enable80211BeOverride;
 }

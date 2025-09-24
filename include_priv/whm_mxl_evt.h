@@ -15,6 +15,7 @@
 #define WPA_MSG_MAX_EVENT_NAME_LEN 64
 
 typedef void (* evtParser_f)(void* userData, char* ifName, char* event, char* params);
+typedef swl_rc_ne (* custEvtParser_f)(void* userData, char* ifName, char* event, char* params);
 
 swl_rc_ne mxl_evt_setVendorEvtHandlers(T_Radio* pRad);
 

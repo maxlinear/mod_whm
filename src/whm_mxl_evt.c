@@ -190,46 +190,11 @@ static void s_mxl_ACSCompletedEvt(void* userData, char* ifName, char* event _UNU
     s_updateNewChanspec(pRad, &chanSpec, CHAN_REASON_AUTO);
 }
 
-/*
- * Update main 5GHz RadioStatus when receiving DFS CAC events on the zwdfs radio interface
- * - zwdfs CAC started   => notify BG DFS clear started and set ChannelMgt RadioStatus to BG_CAC/BG_CAC_NS
- * - zwdfs CAC completed => notify BG DFS clear ended and set ChannelMgt RadioStatus to Up
- */
-static void s_mxl_DfsCacEvts(void* userData _UNUSED, char* ifName, char* event, char* params) {
-    T_Radio* pRadZwDfs = mxl_rad_getZwDfsRadio();
-    ASSERTS_NOT_NULL(pRadZwDfs, , ME, "NULL");
-    ASSERTS_TRUE(swl_str_matches(ifName, pRadZwDfs->Name), ,ME, "%s: not zwdfs radio", ifName);
-
-    T_Radio* pRad5GHzData = wld_getRadioByFrequency(SWL_FREQ_BAND_5GHZ);
-    ASSERT_NOT_NULL(pRad5GHzData, , ME, "NULL");
-
-    if(swl_str_matches(event, "DFS-CAC-START")) {
-        ASSERTI_TRUE((wld_rad_isUpAndReady(pRad5GHzData) && !wld_rad_isDoingDfsScan(pRad5GHzData)), ,ME,
-                      "%s: not ready", pRad5GHzData->Name);
-        wld_bgdfs_notifyClearStarted(pRad5GHzData, pRadZwDfs->targetChanspec.chanspec.channel,
-                                     pRadZwDfs->targetChanspec.chanspec.bandwidth, BGDFS_TYPE_CLEAR);
-        if(pRad5GHzData->channel != pRad5GHzData->currentChanspec.chanspec.channel) {
-            pRad5GHzData->detailedState = CM_RAD_BG_CAC;
-        } else {
-            pRad5GHzData->detailedState = CM_RAD_BG_CAC_NS;
-        }
-    } else if(swl_str_matches(event, "DFS-CAC-COMPLETED")) {
-        ASSERTI_TRUE(((pRad5GHzData->detailedState  == CM_RAD_BG_CAC) || (pRad5GHzData->detailedState  == CM_RAD_BG_CAC_NS)), ,ME,
-                      "%s: detailedState %s", pRad5GHzData->Name, cstr_chanmgt_rad_state[pRad5GHzData->detailedState]);
-        bool success = wld_wpaCtrl_getValueInt(params, "success");
-        wld_bgdfs_notifyClearEnded(pRad5GHzData, (success ? DFS_RESULT_OK : DFS_RESULT_OTHER));
-        pRad5GHzData->detailedState = CM_RAD_UP;
-    }
-    wld_rad_updateState(pRad5GHzData, false);
-}
-
 SWL_TABLE(mxl_WpaCtrlEvents,
           ARR(char* evtName; void* evtParser; ),
           ARR(swl_type_charPtr, swl_type_voidPtr),
           ARR(
               {"ACS-COMPLETED", &s_mxl_ACSCompletedEvt},
-              {"DFS-CAC-START", &s_mxl_DfsCacEvts},
-              {"DFS-CAC-COMPLETED", &s_mxl_DfsCacEvts},
               ));
 
 static evtParser_f s_mxl_getEventParser(char* eventName) {
@@ -273,7 +238,7 @@ static void s_mxl_ObssCoexBwChngd(T_Radio* pRad, uint32_t channel, uint32_t oper
     s_updateNewChanspec(pRad, &newChanSpec, CHAN_REASON_OBSS_COEX);
 }
 
-static void s_mxl_apBwChanged(void* userData, char* ifName _UNUSED, char* event _UNUSED, char* params _UNUSED) {
+static swl_rc_ne s_mxl_apBwChanged(void* userData, char* ifName _UNUSED, char* event _UNUSED, char* params _UNUSED) {
     /* Expected msg format:
      * <3>AP-BW-CHANGED freq=%d Channel=%d OperatingChannelBandwidth=%d ExtensionChannel=%d cf1=%d cf2=%d reason=%s dfs_chan=%d
      */
@@ -286,6 +251,86 @@ static void s_mxl_apBwChanged(void* userData, char* ifName _UNUSED, char* event 
             s_mxl_ObssCoexBwChngd(pRad, channel, operCbw);
         }
     }
+    return SWL_RC_DONE;
+}
+
+SWL_TABLE(sMxlChWidthMaps,
+          ARR(uint32_t chWidthId; char* chWidthDesc; swl_bandwidth_e swlBw; ),
+          ARR(swl_type_uint32, swl_type_charPtr, swl_type_uint32, ),
+          ARR({0, "20 MHz (no HT)", SWL_BW_20MHZ}, //CHAN_WIDTH_20_NOHT
+              {1, "20 MHz", SWL_BW_20MHZ},         //CHAN_WIDTH_20
+              {2, "40 MHz", SWL_BW_40MHZ},         //CHAN_WIDTH_40
+              {3, "80 MHz", SWL_BW_80MHZ},         //CHAN_WIDTH_80
+              {4, "80+80 MHz", SWL_BW_160MHZ},     //CHAN_WIDTH_80P80
+              {5, "160 MHz", SWL_BW_160MHZ},       //CHAN_WIDTH_160
+              {10, "320 MHz", SWL_BW_320MHZ},      //CHAN_WIDTH_320
+              ));
+
+static swl_rc_ne s_freqParamToChanSpec(char* params, const char* key, swl_chanspec_t* pChanSpec) {
+    ASSERTS_STR(params, SWL_RC_INVALID_PARAM, ME, "Empty");
+    ASSERTS_NOT_NULL(pChanSpec, SWL_RC_INVALID_PARAM, ME, "NULL");
+    uint32_t ctrlFreq = 0;
+    ASSERTS_TRUE(wld_wpaCtrl_getValueIntExt(params, key, (int32_t*) &ctrlFreq), SWL_RC_ERROR,
+                 ME, "Missing %s param", key);
+    swl_chanspec_t chanSpec;
+    swl_rc_ne rc = swl_chanspec_channelFromMHz(&chanSpec, ctrlFreq);
+    ASSERT_FALSE(rc < SWL_RC_OK, rc, ME, "fail to get chanspec for freq(%d)", ctrlFreq);
+    pChanSpec->channel = chanSpec.channel;
+    pChanSpec->band = chanSpec.band;
+    return SWL_RC_OK;
+}
+
+static swl_rc_ne s_chWidthIdToChanSpec(char* params, const char* key, swl_chanspec_t* pChanSpec) {
+    ASSERTS_STR(params, SWL_RC_INVALID_PARAM, ME, "Empty");
+    ASSERTS_NOT_NULL(pChanSpec, SWL_RC_INVALID_PARAM, ME, "NULL");
+    uint32_t chWId = 0;
+    ASSERTS_TRUE(wld_wpaCtrl_getValueIntExt(params, key, (int32_t*) &chWId), SWL_RC_ERROR,
+                 ME, "Missing %s param", key);
+    swl_bandwidth_e* pBwEnu = (swl_bandwidth_e*) swl_table_getMatchingValue(&sMxlChWidthMaps, 2, 0, &chWId);
+    ASSERTS_NOT_NULL(pBwEnu, SWL_RC_ERROR, ME, "unknown channel width id (%d)", chWId);
+    pChanSpec->bandwidth = *pBwEnu;
+    return SWL_RC_OK;
+}
+
+static swl_rc_ne s_mxl_DfsCacEvts(void* userData, char* ifName _UNUSED, char* event _UNUSED,
+                            char* params _UNUSED) {
+
+    T_Radio* pRad = (T_Radio*) userData;
+    ASSERT_NOT_NULL(pRad, SWL_RC_INVALID_PARAM, ME, "NULL");
+
+    if (swl_str_matches(event, "DFS-CAC-START")) {
+        if (strstr(params, "background")) {
+            // Example: DFS-CAC-START freq=5500 chan=100 chan_offset=0 width=3 seg0=5530 seg1=0 cac_time=60s (background)
+            swl_chanspec_t chanSpec = SWL_CHANSPEC_EMPTY;
+            ASSERT_FALSE(s_freqParamToChanSpec(params, "freq", &chanSpec) < SWL_RC_OK,
+                         SWL_RC_ERROR, ME, "fail to get freq");
+            ASSERT_FALSE(s_chWidthIdToChanSpec(params, "width", &chanSpec) < SWL_RC_OK,
+                         SWL_RC_ERROR, ME, "fail to get channel width");
+
+            uint32_t cac_time = wld_wpaCtrl_getValueInt(params, "cac_time");
+
+            SAH_TRACEZ_WARNING(ME, "%s: background cac started on channel=%d, width=%d,cac time=%d",
+                               ifName, chanSpec.channel, chanSpec.bandwidth, cac_time);
+
+            wld_channel_mark_passive_band(chanSpec);
+            swl_chanspec_t tgtChanspec = wld_chanmgt_getTgtChspec(pRad);
+
+            if (swl_channel_isInChanspec(&tgtChanspec, chanSpec.channel)) {
+                pRad->detailedState = CM_RAD_BG_CAC;
+            } else {
+                pRad->detailedState = CM_RAD_BG_CAC_NS;
+            }
+            wld_rad_updateState(pRad, false);
+            /* Returning SWL_RC_DONE will skip this event in standard event processing in
+             * s_processStdEvent in wld_wpaCtrl_events.c.
+             */
+            return SWL_RC_DONE;
+        }
+    }
+    /* Returning < SWL_RC_DONE will make pwhm to process foreground DFS-CAC-START
+     * in  s_processStdEvent.
+     */
+    return  SWL_RC_OK;
 }
 
 SWL_TABLE(mxl_CustomWpaCtrlEvents,
@@ -293,10 +338,11 @@ SWL_TABLE(mxl_CustomWpaCtrlEvents,
           ARR(swl_type_charPtr, swl_type_voidPtr),
           ARR(
               {"AP-BW-CHANGED", &s_mxl_apBwChanged},
+              {"DFS-CAC-START", &s_mxl_DfsCacEvts},
               ));
 
-static evtParser_f s_mxl_getCustomEventParser(char* eventName) {
-    evtParser_f* pfEvtHdlr = (evtParser_f*) swl_table_getMatchingValue(&mxl_CustomWpaCtrlEvents, 1, 0, eventName);
+static custEvtParser_f s_mxl_getCustomEventParser(char* eventName) {
+    custEvtParser_f* pfEvtHdlr = ( custEvtParser_f *) swl_table_getMatchingValue(&mxl_CustomWpaCtrlEvents, 1, 0, eventName);
     ASSERTS_NOT_NULL(pfEvtHdlr, NULL, ME, "no handler defined for evt(%s)", eventName);
     return *pfEvtHdlr;
 }
@@ -308,17 +354,19 @@ static swl_rc_ne s_mxl_WpaCustomCtrlEvtMsg(void* userData, char* ifName, char* m
     pEvent += sizeof(WPA_MSG_LEVEL_INFO) - 1;
     uint32_t eventNameLen = strlen(pEvent);
     char* pParams = strchr(pEvent, ' ');
+    swl_rc_ne rc = SWL_RC_ERROR;
+
     if (pParams) {
         eventNameLen = pParams - pEvent;
         pParams++;
     }
     char eventName[eventNameLen + 1];
     swl_str_copy(eventName, sizeof(eventName), pEvent);
-    evtParser_f fEvtHdlr = s_mxl_getCustomEventParser(eventName);
+    custEvtParser_f fEvtHdlr = s_mxl_getCustomEventParser(eventName);
     ASSERTS_NOT_NULL(fEvtHdlr, SWL_RC_ERROR, ME, "%s: No parser for evt(%s)", ifName, eventName)
     SAH_TRACEZ_INFO(ME, "%s: receive msg '%s'", ifName, msgData);
-    fEvtHdlr(userData, ifName, eventName, pParams);
-    return SWL_RC_OK;
+    rc = fEvtHdlr(userData, ifName, eventName, pParams);
+    return rc;
 }
 
 static swl_rc_ne s_mxl_setRadioWpaCtrlEvtHandlers(T_Radio* pRad) {

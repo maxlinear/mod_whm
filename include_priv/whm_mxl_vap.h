@@ -59,6 +59,8 @@ typedef struct {
     bool h2eRequired;
     /* Enable or Disable ignoring of 11vDiassoc timer */
     bool ignore11vDiassoc;
+    /* Setting the QoS Map */
+    char QoSMap[70];
 } mxl_VapVendorData_t;
 
 /* Macros Section */
@@ -68,7 +70,7 @@ int whm_mxl_vap_createHook(T_AccessPoint* pAP);
 void whm_mxl_vap_destroyHook(T_AccessPoint* pAP);
 mxl_VapVendorData_t* mxl_vap_getVapVendorData(const T_AccessPoint* pAP);
 swl_rc_ne whm_mxl_vap_getSingleStationStats(T_AssociatedDevice* pAD);
-int whm_mxl_vap_getStationStats(T_AccessPoint* pAP);
+swl_rc_ne whm_mxl_vap_getStationStats(T_AccessPoint* pAP);
 
 int whm_mxl_vap_updateApStats(T_AccessPoint* pAP);
 int whm_mxl_vap_enable(T_AccessPoint* pAP, int enable, int set);
@@ -88,6 +90,5 @@ swl_rc_ne whm_mxl_vap_postUpActions(T_AccessPoint* pAP);
 swl_rc_ne whm_mxl_vap_postDownActions(T_AccessPoint* pAP);
 void whm_mxl_registerToWdsEvent(void);
 void whm_mxl_unregisterToWdsEvent(void);
-swl_rc_ne whm_mxl_vap_wpaKeyMgmt (T_AccessPoint* pAP, const char* paramValue);
 
 #endif /* __WHM_MXL_VAP_H__ */

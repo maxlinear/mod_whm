@@ -30,15 +30,11 @@
                 object Security {
                     parameter ModesAvailable = "WPA3-Personal,OWE";
                     parameter SAEPassphrase = "password";
+                    parameter MFPConfig = "Required";
                 }
-{% elif ( Itf.OperatingFrequency == "5GHz" ) : %}
+{% else %}
                 object Security {
-                    parameter ModesAvailable = "None,WPA-WPA2-Personal,WPA2-Personal,WPA3-Personal,WPA2-WPA3-Personal,WPA2-Enterprise,WPA-WPA2-Enterprise,OWE";
-                    parameter ModeEnabled = "WPA2-Personal";
-                }
-{% elif ( Itf.OperatingFrequency == "2.4GHz" ) : %}
-                object Security {
-                    parameter ModesAvailable = "None,WPA-WPA2-Personal,WPA2-Personal,WPA3-Personal,WPA2-WPA3-Personal,WPA2-Enterprise,WPA-WPA2-Enterprise,OWE";
+                    parameter ModesAvailable = "None,WPA2-Personal,WPA3-Personal,WPA2-WPA3-Personal,WPA2-Enterprise,OWE";
                     parameter ModeEnabled = "WPA2-Personal";
                 }
 {% endif %}
