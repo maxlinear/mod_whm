@@ -87,6 +87,15 @@
                     on action validate call check_range { min = 0, max = 60 };
                 }
                 /**
+                 * Override enabling IEEE 802.11be functionality
+                 * If true  - Enabled regardless of pWHM's Configuration (Radio should have BE enabled)
+                 * If false - Enabled/Disabled by pWHM
+                 * NOTE: Should be remove/deprecated once MxL adapts pWHM's BE support.
+                 */
+                %persistent bool Enable80211BeOverride {
+                    default true;
+                }
+                /**
                  * Set first non DFS channel. This mode will be valid only if AutoChannelEnable will be disabled
                  */
                 %persistent bool FirstNonDfs = 0 {
@@ -978,25 +987,41 @@
                         default 0;
                     }
                 }
-                /*
-                  Vendor MLO Configuration parameters
-                */
+                /**
+                 * Vendor MLO Configuration parameters
+                 */
                 %persistent object MLO {
                     on event "*" call whm_mxl_vendorMLO_setConf_ocf;
 
-                    /*mlo_id*/
+                   /**
+                    * MloId - ID that identifies link(s) in an MLD.
+                    * Assigning the same MloId to VAPs(links) will group
+                    * & create an MLD with those VAPs.
+                    * Currently MxL MLO allows MLDs creation with 2 links
+                    * NOTE: Valid MloId's are Whole Numbers. -1 indicates
+                    *       VAP isn't part of any MLD
+                    */
                     %persistent int32 MloId {
                         default -1;
                     }
-                    /*ap_mld_mac*/
+
+                   /**
+                    * ApMldMac(ap_mld_mac) - MAC address of the MLD AP
+                    * Used to override the MLD's Mac address.
+                    * Default: 00:00:00:00:00:00 (link's BSSID is considered)
+                    * NOTE: Setting it to default will reupdate the object's
+                    * value to link's BSSID
+                    */
                     %persistent string ApMldMac {
                         on action validate call is_valid_macaddr;
-                        default "";
+                        default "00:00:00:00:00:00";
                     }
+
                     /*wds_single_ml_assoc*/
                     %persistent bool WdsSingleMlAssoc {
                         default false;
                     }
+
                     /*wds_primary_link*/
                     %persistent bool WdsPrimaryLink {
                         default false;
@@ -1275,7 +1300,7 @@
             */
             %persistent object Vendor {
                 on event "*" call whm_mxl_ep_setEpVendorObj_ocf;
-                
+
                 /**
                  * wds - If set, station may connect to peer ap in 4 address mode
                  *

@@ -3,21 +3,16 @@
         object Radio {
 {% for ( let Radio in BD.Radios ) : %}
             object '{{Radio.Alias}}' {
+                parameter OperatingStandardsFormat = "Legacy";
+                parameter OperatingStandards = "be";
                 parameter RegulatoryDomain = "US";
                 parameter DTIMPeriod = 2;
                 parameter MultiUserMIMOEnabled = 1;
             }
-{% if (Radio.OperatingFrequency == "2.4GHz") : %}
-            object '{{Radio.Alias}}' {
-                parameter AutoChannelEnable = true;
-                parameter OperatingChannelBandwidth = "20MHz";
-                parameter OperatingStandards = "b,g,n,ax";
-            }
-{% elif (Radio.OperatingFrequency == "5GHz") : %}
+{% if (Radio.OperatingFrequency == "5GHz") : %}
             object '{{Radio.Alias}}' {
                 parameter AutoChannelEnable = true;
                 parameter OperatingChannelBandwidth = "80MHz";
-                parameter OperatingStandards = "a,n,ac,ax";
                 object IEEE80211ax {
                     parameter MBSSIDAdvertisementMode = "Off";
                 }
@@ -36,7 +31,6 @@
             object '{{Radio.Alias}}' {
                 parameter Channel = 37;
                 parameter OperatingChannelBandwidth = "160MHz";
-                parameter OperatingStandards = "ax";
                 object IEEE80211ax {
                     parameter MBSSIDAdvertisementMode = "On";
                 }

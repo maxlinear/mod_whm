@@ -38,6 +38,7 @@
 
 static swl_rc_ne s_doHapdRestart(T_Radio* pRad, T_AccessPoint* pAP _UNUSED) {
     ASSERT_NOT_NULL(pRad, SWL_RC_INVALID_PARAM, ME, "pRad is NULL");
+    wld_secDmn_setRestartNeeded(pRad->hostapd, true);
     pRad->pFA->mfn_wrad_secDmn_restart(pRad, SET);
     return SWL_RC_OK;
 }
@@ -133,7 +134,6 @@ SWL_TABLE(sVendorParamsOdlToConf,
               {"DuplicateBeaconEnabled",        "duplicate_beacon_enabled"},
               {"DuplicateBeaconBw",             "duplicate_beacon_bw"},
               {"SetQAMplus",                    "sQAMplus"},
-              {"Ieee80211Be",                   "ieee80211be"},
               {"SetRadarRssiTh",                "sRadarRssiTh"},
               {"ObssBeaconRssiThreshold",       "obss_beacon_rssi_threshold"},
               {"ObssInterval",                  "obss_interval"},
@@ -408,7 +408,6 @@ SWL_TABLE(sRadCfgParamsActionMap,
           ARR(swl_type_charPtr, swl_type_uint32, ),
           ARR(//params/object set and applied with hostapd actions
               //Actions applied with hostapd restart
-              {"Ieee80211Be",                   HAPD_ACTION_NEED_RESTART},
               {"Ignore40MhzIntolerant",         HAPD_ACTION_NEED_RESTART},
               {"HtCapabilities",                HAPD_ACTION_NEED_RESTART},
               {"VhtCapabilities",               HAPD_ACTION_NEED_RESTART},
@@ -680,15 +679,15 @@ SWL_TABLE(sVapCfgParamsActionMap,
           ARR(swl_type_charPtr, swl_type_uint32, ),
           ARR(//params/object set and applied with hostapd actions
               //Actions applied with hostapd restart
-              {"UnsolBcastProbeRespInterval",   HAPD_ACTION_NEED_RESTART},
-              {"FilsDiscoveryMaxInterval",      HAPD_ACTION_NEED_RESTART},
+              {"MLOEnable",                     HAPD_ACTION_NEED_RESTART},
+              {"ApMldMac",                      HAPD_ACTION_NEED_RESTART},
               //Actions applied with hostapd toggle
+              {"UnsolBcastProbeRespInterval",   HAPD_ACTION_NEED_TOGGLE},
+              {"FilsDiscoveryMaxInterval",      HAPD_ACTION_NEED_TOGGLE},
               {"EnableHairpin",                 HAPD_ACTION_NEED_TOGGLE},
               {"ManagementFramesRate",          HAPD_ACTION_NEED_TOGGLE},
               {"NumResSta",                     HAPD_ACTION_NEED_TOGGLE},
               {"VendorVht",                     HAPD_ACTION_NEED_TOGGLE},
-              {"MLOEnable",                     HAPD_ACTION_NEED_TOGGLE},
-              {"ApMldMac",                      HAPD_ACTION_NEED_TOGGLE},
               {"WdsSingleMlAssoc",              HAPD_ACTION_NEED_TOGGLE},
               {"WdsPrimaryLink",                HAPD_ACTION_NEED_TOGGLE},
               {"SoftBlockAclEnable",            HAPD_ACTION_NEED_TOGGLE},
@@ -892,18 +891,6 @@ swl_rc_ne whm_mxl_determineEpParamAction(T_EndPoint* pEP, const char* paramName)
  */
 swl_rc_ne whm_mxl_restartHapd(T_Radio* pRad) {
     ASSERT_NOT_NULL(pRad, SWL_RC_INVALID_PARAM, ME, "No Radio Mapped");
-    return s_doHapdRestart(pRad, NULL);
-}
-
-/**
- * @brief Request hostapd restart (Kill and Restart) from pwhm state machine for MLO config
- *
- * @param pRad radio
- * @return return code of executed action.
- */
-swl_rc_ne whm_mxl_mlo_restartHapd(T_Radio* pRad) {
-    ASSERT_NOT_NULL(pRad, SWL_RC_INVALID_PARAM, ME, "No Radio Mapped");
-    wld_secDmn_setRestartNeeded(pRad->hostapd, true);
     return s_doHapdRestart(pRad, NULL);
 }
 
@@ -1149,17 +1136,6 @@ swl_rc_ne whm_mxl_configureSaeExt(T_AccessPoint* pAP) {
 
     whm_mxl_set_vendorMultipleParams(pAP, secApParams, SWL_ARRAY_SIZE(secApParams));
     whm_mxl_toggleHapd(pRad);
-    return SWL_RC_OK;
-}
-
-swl_rc_ne whm_mxl_hostapd_setMldParams(T_AccessPoint* pAP) {
-    ASSERT_NOT_NULL(pAP, SWL_RC_INVALID_PARAM, ME, "No pAP Mapped");
-
-    const char* mldParams[] = {
-        "mlo_enable"
-    };
-
-    whm_mxl_set_vendorMultipleParams(pAP, mldParams, SWL_ARRAY_SIZE(mldParams));
     return SWL_RC_OK;
 }
 

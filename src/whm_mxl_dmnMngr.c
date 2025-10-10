@@ -291,7 +291,14 @@ static void s_setDmnExecOptsObj_ocf(void* priv _UNUSED, amxd_object_t* object, c
                 whm_mxl_dmnMngr_setDmnCtxState(pDmnCtx, MXL_SECDMN_STATE_RST);
                 s_setHapdDmnStartArgs(pVendor);
             }
-            whm_mxl_restartAllRadios();
+            T_Radio* pRad;
+            wld_for_eachRad(pRad) {
+                if (pRad && pRad->pBus) {
+                    SAH_TRACEZ_INFO(ME, "Restarting hostapd from %s", pRad->Name);
+                    whm_mxl_restartHapd(pRad);
+                    break;
+                }
+            }
         } else if (swl_str_matches(pDmnCtx->name, MXL_WPASUPPLICANT)) {
             if (suppMasterModeChanged) {
                 /* restart all wpa_supplicants when Supplicant Master Mode is changed */

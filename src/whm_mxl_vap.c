@@ -78,12 +78,18 @@ static void s_enableSync(amxp_timer_t* timer _UNUSED, void* priv) {
 
 static void s_mxl_vap_init_vendordata(T_AccessPoint* pAP) {
     ASSERT_NOT_NULL(pAP, , ME, "pAP is NULL");
-    /* Add desired initializations here*/
     mxl_VapVendorData_t* mxlVapVendorData = mxl_vap_getVapVendorData(pAP);
-    mxlVapVendorData->mloId = -1;
-    mxlVapVendorData->MLO_destroyInProgress = 0;
+
+    /* Add desired initializations here*/
     mxlVapVendorData->saeExtKey = 0;
     mxlVapVendorData->EnableWPA3PersonalCompatibility = 0;
+
+    // MLD Link data defaults
+    mxlVapVendorData->mldLink.mloId = NO_LINK_ID;
+    swl_mac_charClear(&mxlVapVendorData->mldLink.apMldMac);
+    mxlVapVendorData->mldLink.wdsSingleMlAssoc = false;
+    mxlVapVendorData->mldLink.wdsPrimaryLink = false;
+
     /* Init VAP enable sync timer */
     amxp_timer_new(&mxlVapVendorData->onVapEnableSyncTimer, s_enableSync, pAP);
     return;
@@ -1297,70 +1303,106 @@ void _whm_mxl_vendorMultiAp_setConf_ocf(const char* const sig_name,
     swla_dm_procObjEvtOfLocalDm(&sVendorMutliApDmHdlrs, sig_name, data, priv);
 }
 
-static void s_setMloBoolFlag_pwf(void* priv _UNUSED, amxd_object_t* object, amxd_param_t* param, const amxc_var_t* const newParamValues) {
+static void s_setMloId_pwf(void* priv _UNUSED, amxd_object_t* object,
+                           amxd_param_t* param _UNUSED,
+                           const amxc_var_t* const newParamValues) {
     SAH_TRACEZ_IN(ME);
     /* WiFi.AccessPoint.{}.Vendor.MLO */
     amxd_object_t* vapObj = amxd_object_get_parent(amxd_object_get_parent(object));
     T_AccessPoint* pAP = wld_ap_fromObj(vapObj);
     ASSERT_NOT_NULL(pAP, , ME, "No AccessPoint Mapped");
-    mxl_VapVendorData_t* mxlVapVendorData = mxl_vap_getVapVendorData(pAP);
-    ASSERTS_NOT_NULL(mxlVapVendorData, , ME, "mxlVapVendorData is NULL");
-    bool mloBoolParam = amxc_var_dyncast(bool, newParamValues);
-    whm_mxl_determineVapParamAction(pAP, amxd_param_get_name(param), (mloBoolParam ? "1" : "0"));
-    SAH_TRACEZ_OUT(ME);
-}
+    mxl_VapVendorData_t* vapVendor = mxl_vap_getVapVendorData(pAP);
+    ASSERTS_NOT_NULL(vapVendor, , ME, "vapVendor is NULL");
 
-static void s_setMloMacAddr_pwf(void* priv _UNUSED, amxd_object_t* object, amxd_param_t* param, const amxc_var_t* const newParamValues) {
-    SAH_TRACEZ_IN(ME);
-    /* WiFi.AccessPoint.{}.Vendor.MLO */
-    amxd_object_t* vapObj = amxd_object_get_parent(amxd_object_get_parent(object));
-    T_AccessPoint* pAP = wld_ap_fromObj(vapObj);
-    ASSERT_NOT_NULL(pAP, , ME, "No AccessPoint Mapped");
-    mxl_VapVendorData_t* mxlVapVendorData = mxl_vap_getVapVendorData(pAP);
-    ASSERTS_NOT_NULL(mxlVapVendorData, , ME, "mxlVapVendorData is NULL");
-    const char* mloMacAddr = amxc_var_constcast(cstring_t, newParamValues);
-    whm_mxl_determineVapParamAction(pAP, amxd_param_get_name(param), mloMacAddr);
-    SAH_TRACEZ_OUT(ME);
-}
-
-static void s_setMloID_pwf(void* priv _UNUSED, amxd_object_t* object, amxd_param_t* param _UNUSED, const amxc_var_t* const newParamValues) {
-    SAH_TRACEZ_IN(ME);
-    /* WiFi.AccessPoint.{}.Vendor.MLO */
-    amxd_object_t* vapObj = amxd_object_get_parent(amxd_object_get_parent(object));
-    T_AccessPoint* pAP = wld_ap_fromObj(vapObj);
-    ASSERT_NOT_NULL(pAP, , ME, "No AccessPoint Mapped");
-    mxl_VapVendorData_t* mxlVapVendorData = mxl_vap_getVapVendorData(pAP);
-    ASSERTS_NOT_NULL(mxlVapVendorData, , ME, "mxlVapVendorData is NULL");
+    int32_t currMloId = vapVendor->mldLink.mloId;
     int32_t newMloId = amxc_var_get_int32_t(newParamValues);
-    if (newMloId == -1 && !(mxlVapVendorData->MLO_destroyInProgress) && whm_mxl_isMLAssociatedVap(pAP)) {
-        whm_mxl_destroyMLVap(pAP);
-        return;
-    }
-    mxlVapVendorData->mloId = newMloId;
-    whm_mxl_hostapd_setMldParams(pAP);
-    char mloIdValStr[MAX_NUM_OF_DIGITS] = {0};
-    swl_str_catFormat(mloIdValStr, sizeof(mloIdValStr), "%d", newMloId);
-    int32_t numLinks = whm_mxl_getNumMLlinksbyID(newMloId);
-    ASSERT_FALSE((numLinks > 2), , ME, "MLO: MLO_ID %d, is already utilized by 2 AP objects", newMloId);
-    T_AccessPoint* sibBSS = whm_mxl_getSiblingBss(pAP, newMloId);
-    ASSERT_NOT_NULL(sibBSS, , ME, "MLO: No Sibling BSS Found returning");
-    SAH_TRACEZ_INFO(ME, "MLO: Sibling BSS Found: %s", sibBSS->alias);
-    /* API to Validate MLO Vap Configuration and Do Interface Toggle */
-    whm_mxl_createMLVap(sibBSS, pAP);
+
+    ASSERT_FALSE(whm_mxl_mlo_confVap(pAP, currMloId, newMloId) < SWL_RC_OK, , ME,
+                 "MLO: Failed to set MloID %d for %s", newMloId, pAP->alias);
+
     SAH_TRACEZ_OUT(ME);
 }
 
-SWLA_DM_HDLRS(sVendorMLODmHdlrs,
-              ARR(SWLA_DM_PARAM_HDLR("MloId", s_setMloID_pwf),
-                  SWLA_DM_PARAM_HDLR("ApMldMac", s_setMloMacAddr_pwf),
-                  SWLA_DM_PARAM_HDLR("WdsSingleMlAssoc", s_setMloBoolFlag_pwf),
-                  SWLA_DM_PARAM_HDLR("WdsPrimaryLink", s_setMloBoolFlag_pwf))
+static void s_setApMldMac_pwf(void* priv _UNUSED, amxd_object_t* object,
+                              amxd_param_t* _UNUSED,
+                              const amxc_var_t* const newParamValues) {
+    SAH_TRACEZ_IN(ME);
+    /* WiFi.AccessPoint.{}.Vendor.MLO */
+    amxd_object_t* vapObj = amxd_object_get_parent(amxd_object_get_parent(object));
+    T_AccessPoint* pAP = wld_ap_fromObj(vapObj);
+    ASSERT_NOT_NULL(pAP, , ME, "No AccessPoint Mapped");
+    mxl_VapVendorData_t* vapVendor = mxl_vap_getVapVendorData(pAP);
+    ASSERTS_NOT_NULL(vapVendor, , ME, "vapVendor is NULL");
+    const char* mloMacAddr = amxc_var_constcast(cstring_t, newParamValues);
+    swl_macChar_t newApMldMac;
+    swl_mac_charToStandard(&newApMldMac, mloMacAddr);
+
+    ASSERT_FALSE(swl_mac_charMatches(&vapVendor->mldLink.apMldMac, &newApMldMac), ,
+                 ME, "MLO: ApMldMac equals new MACAddress for link %s", pAP->alias);
+    ASSERT_FALSE(vapVendor->mldLink.mloId == NO_LINK_ID, , ME,
+                 "MLO: MloId is not set for %s", pAP->alias);
+
+    T_AccessPoint* pSiblingAP = whm_mxl_mlo_getSiblingAP(pAP, vapVendor->mldLink.mloId);
+    ASSERT_NOT_NULL(pSiblingAP, , ME, "MLO: MLD(%d) is not initialized yet",
+                    vapVendor->mldLink.mloId);
+    amxd_object_t* pSiblingMLO = whm_mxl_mlo_getMloObject(pSiblingAP);
+    ASSERT_NOT_NULL(pSiblingMLO, , ME, "MLO is not Mapped");
+    mxl_VapVendorData_t* sibVapVendor = mxl_vap_getVapVendorData(pSiblingAP);
+    ASSERTS_NOT_NULL(sibVapVendor, , ME, "vapVendor is NULL");
+
+    SAH_TRACEZ_INFO(ME, "MLO: config ap_mld_mac for MLD(%d) with %s",
+                     vapVendor->mldLink.mloId, newApMldMac.cMac);
+
+    // Handle default value case
+    if (swl_mac_charIsNull(&newApMldMac))
+        SWL_MAC_BIN_TO_CHAR(&newApMldMac, ((T_SSID*) pAP->pSSID)->BSSID);
+
+    swl_str_copy(vapVendor->mldLink.apMldMac.cMac, SWL_MAC_CHAR_LEN, newApMldMac.cMac);
+    swl_str_copy(sibVapVendor->mldLink.apMldMac.cMac, SWL_MAC_CHAR_LEN, newApMldMac.cMac);
+    amxd_object_set_value(cstring_t, object, "ApMldMac", newApMldMac.cMac);
+    amxd_object_set_value(cstring_t, pSiblingMLO, "ApMldMac", newApMldMac.cMac);
+    whm_mxl_restartHapd(pAP->pRadio);
+
+    SAH_TRACEZ_OUT(ME);
+}
+
+static void s_setMloConfig_ocf(void* priv _UNUSED, amxd_object_t* object,
+                               const amxc_var_t* const newParamValues) {
+    SAH_TRACEZ_IN(ME);
+    /* WiFi.AccessPoint.{}.Vendor.MLO */
+    amxd_object_t* vapObj = amxd_object_get_parent(amxd_object_get_parent(object));
+    T_AccessPoint* pAP = wld_ap_fromObj(vapObj);
+    ASSERT_NOT_NULL(pAP, , ME, "No AccessPoint Mapped");
+    mxl_VapVendorData_t* vapVendor = mxl_vap_getVapVendorData(pAP);
+    ASSERTS_NOT_NULL(vapVendor, , ME, "vapVendor is NULL");
+
+    amxc_var_for_each(newValue, newParamValues) {
+        const char* pname = amxc_var_key(newValue);
+        if(swl_str_matches(pname, "WdsSingleMlAssoc")) {
+            bool wdsSingleMlAssoc = amxc_var_dyncast(bool, newValue);
+            vapVendor->mldLink.wdsSingleMlAssoc = wdsSingleMlAssoc;
+            whm_mxl_determineVapParamAction(pAP, pname, (wdsSingleMlAssoc ? "1" : "0"));
+        } else if(swl_str_matches(pname, "WdsPrimaryLink")) {
+            bool wdsPrimaryLink = amxc_var_dyncast(bool, newValue);
+            vapVendor->mldLink.wdsPrimaryLink = wdsPrimaryLink;
+            whm_mxl_determineVapParamAction(pAP, pname, (wdsPrimaryLink ? "1" : "0"));
+        } else {
+            continue;
+        }
+    }
+    SAH_TRACEZ_OUT(ME);
+}
+
+SWLA_DM_HDLRS(sVendorMloDmHdlrs,
+              ARR(SWLA_DM_PARAM_HDLR("MloId", s_setMloId_pwf),
+                  SWLA_DM_PARAM_HDLR("ApMldMac", s_setApMldMac_pwf)),
+              .objChangedCb = s_setMloConfig_ocf,
               );
 
 void _whm_mxl_vendorMLO_setConf_ocf(const char* const sig_name,
                             const amxc_var_t* const data,
                             void* const priv) {
-    swla_dm_procObjEvtOfLocalDm(&sVendorMLODmHdlrs, sig_name, data, priv);
+    swla_dm_procObjEvtOfLocalDm(&sVendorMloDmHdlrs, sig_name, data, priv);
 }
 
 static void s_setSoftBlockAclEnable_pwf(void* priv _UNUSED, amxd_object_t* object, amxd_param_t* param, const amxc_var_t* const newParamValues) {
@@ -1648,17 +1690,6 @@ swl_rc_ne whm_mxl_vap_postUpActions(T_AccessPoint* pAP) {
 swl_rc_ne whm_mxl_vap_postDownActions(T_AccessPoint* pAP) {
     ASSERT_NOT_NULL(pAP, SWL_RC_INVALID_PARAM, ME, "NULL");
     /* Add post VAP down actions here */
-    return SWL_RC_OK;
-}
-
-swl_rc_ne whm_mxl_vap_wpaKeyMgmt (T_AccessPoint* pAP, const char* paramValue) {
-    SAH_TRACEZ_IN(ME);
-    ASSERT_NOT_NULL(pAP, SWL_RC_INVALID_PARAM, ME, "NULL");
-
-    if(wld_wpaCtrlInterface_isReady(pAP->wpaCtrlInterface) && (paramValue != NULL)){
-        wld_ap_hostapd_setParamValue(pAP, "wpa_key_mgmt", paramValue, "setting wpa_key_mgmt");
-    }
-    SAH_TRACEZ_OUT(ME);
     return SWL_RC_OK;
 }
 

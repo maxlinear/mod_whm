@@ -37,6 +37,7 @@
 #include "whm_mxl_dmnMngr.h"
 #include "whm_mxl_fsmLocker.h"
 #include "whm_mxl_reconfMngr.h"
+#include "whm_mxl_mlo.h"
 
 #define ME "mxlMod"
 
@@ -229,6 +230,7 @@ bool whm_mxl_module_init(void) {
     fta.mfn_wvap_clean_sta = whm_mxl_vap_clean_sta;
     fta.mfn_wvap_updated_neighbour = whm_mxl_vap_updated_neighbor;
     fta.mfn_wvap_transfer_sta = whm_mxl_vap_transfer_sta;
+    fta.mfn_wvap_setMldUnit = whm_mxl_mlo_setMldUnit;
 
     fta.mfn_wendpoint_enable = whm_mxl_ep_enable;
     fta.mfn_wendpoint_create_hook = whm_mxl_ep_createHook;

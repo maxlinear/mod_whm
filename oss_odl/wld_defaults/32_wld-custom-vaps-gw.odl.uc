@@ -36,11 +36,7 @@
                 object Security {
                     parameter ModesAvailable = "None,WPA2-Personal,WPA3-Personal,WPA2-WPA3-Personal,WPA2-Enterprise,OWE";
                 }
-
 {% endif %}
-                object Security {
-                    parameter RekeyingInterval = 86400;
-                }
             }
 {% endif; endfor; %}
         }

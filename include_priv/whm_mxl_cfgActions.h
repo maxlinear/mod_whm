@@ -52,7 +52,6 @@ swl_rc_ne whm_mxl_determineRadParamAction(T_Radio* pRad, const char* paramName, 
 swl_rc_ne whm_mxl_determineVapParamAction(T_AccessPoint* pAP, const char* paramName, const char* paramValue);
 swl_rc_ne whm_mxl_determineEpParamAction(T_EndPoint* pEP, const char* paramName);
 swl_rc_ne whm_mxl_restartHapd(T_Radio* pRad);
-swl_rc_ne whm_mxl_mlo_restartHapd(T_Radio* pRad);
 swl_rc_ne whm_mxl_toggleHapd(T_Radio* pRad);
 swl_rc_ne whm_mxl_sighupHapd(T_Radio* pRad);
 swl_rc_ne whm_mxl_updateBeaconHapd(T_AccessPoint* pAP);
@@ -63,7 +62,6 @@ swl_rc_ne whm_mxl_updateMultiAp(T_AccessPoint* pAP);
 swl_rc_ne whm_mxl_handleMbssidOverride(T_Radio* pRad, bool overideMbssid);
 swl_rc_ne whm_mxl_updateOnEventMaxAssociatedDevices(T_AccessPoint* pAP);
 swl_rc_ne whm_mxl_configureSaeExt(T_AccessPoint* pAP);
-swl_rc_ne whm_mxl_hostapd_setMldParams(T_AccessPoint* pAP);
 swl_rc_ne whm_mxl_toggleWPA3PersonalCompatibility(T_AccessPoint* pAP);
 whm_mxl_config_flow_e whm_mxl_chooseVapConfigFlow(T_AccessPoint* pAP, whm_mxl_config_type_e type);
 #ifdef CONFIG_VENDOR_MXL_PROPRIETARY

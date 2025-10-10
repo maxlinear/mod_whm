@@ -12,6 +12,7 @@
 #include "wld/wld.h"
 #include "wld/wld_linuxIfUtils.h"
 #include "whm_mxl_cfgActions.h"
+#include "whm_mxl_mlo.h"
 
 /* General Definitions Section */
 typedef enum {
@@ -35,10 +36,6 @@ typedef struct {
     char OWETransSSID[SSID_NAME_LEN];
     /* OWE Transition BSSID */
     char OWETransBSSID[ETHER_ADDR_STR_LEN];
-    /* MLO ID */
-    int32_t mloId;
-    /* Flag to indicate ML VAP destory is in progress */
-    bool MLO_destroyInProgress;
     /* To Configure AKM24 type SAE-EXT-KEY */
     bool saeExtKey;
     /* Flag to indicate WPA3 Personal Compatibility Mode */
@@ -59,6 +56,8 @@ typedef struct {
     bool h2eRequired;
     /* Enable or Disable ignoring of 11vDiassoc timer */
     bool ignore11vDiassoc;
+    /* MLD Link info */
+    whm_mxl_mlo_link_t mldLink; 
 } mxl_VapVendorData_t;
 
 /* Macros Section */
@@ -68,7 +67,7 @@ int whm_mxl_vap_createHook(T_AccessPoint* pAP);
 void whm_mxl_vap_destroyHook(T_AccessPoint* pAP);
 mxl_VapVendorData_t* mxl_vap_getVapVendorData(const T_AccessPoint* pAP);
 swl_rc_ne whm_mxl_vap_getSingleStationStats(T_AssociatedDevice* pAD);
-int whm_mxl_vap_getStationStats(T_AccessPoint* pAP);
+swl_rc_ne whm_mxl_vap_getStationStats(T_AccessPoint* pAP);
 
 int whm_mxl_vap_updateApStats(T_AccessPoint* pAP);
 int whm_mxl_vap_enable(T_AccessPoint* pAP, int enable, int set);
@@ -88,6 +87,5 @@ swl_rc_ne whm_mxl_vap_postUpActions(T_AccessPoint* pAP);
 swl_rc_ne whm_mxl_vap_postDownActions(T_AccessPoint* pAP);
 void whm_mxl_registerToWdsEvent(void);
 void whm_mxl_unregisterToWdsEvent(void);
-swl_rc_ne whm_mxl_vap_wpaKeyMgmt (T_AccessPoint* pAP, const char* paramValue);
 
 #endif /* __WHM_MXL_VAP_H__ */
