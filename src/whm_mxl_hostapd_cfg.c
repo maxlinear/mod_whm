@@ -35,23 +35,6 @@
 
 #define ME "mxlHpdC"
 
-/*
- * Mapping of VHT Channel Width IDs from on hostapd.conf @ https://w1.fi/cgit/hostap/plain/hostapd/hostapd.conf
- * # 0 = 20 or 40 MHz operating Channel width
- * # 1 = 80 MHz channel width
- * # 2 = 160 MHz channel width
- * # 3 = 80+80 MHz channel width
- */
-SWL_TABLE(sChWidthIDsMaps,
-          ARR(uint32_t vhtChWidthIDs; uint32_t ehtChWidthIDs; swl_bandwidth_e swlBw; ),
-          ARR(swl_type_uint32, swl_type_uint32, swl_type_uint32, ),
-          ARR({0, 0, SWL_BW_20MHZ},
-              {0, 0, SWL_BW_40MHZ},
-              {1, 1, SWL_BW_80MHZ},
-              {2, 2, SWL_BW_160MHZ},
-              {2, 9, SWL_BW_320MHZ},
-              ));
-
 /*  *****************************************************************************
 *                                                                              *
 *                           Radio Related Configurations                       *
@@ -254,12 +237,7 @@ static void whm_mxl_rad_configVhtCapabs(T_Radio* pRad, swl_mapChar_t* configMap)
     }
 
     /* Get the vht_oper_chwidth */
-    if(swl_str_matches(vhtOperChWidth, "0")) {
-        shortGi80 = 0;
-        shortGi160 = 0;
-        vht160 = 0;
-    } else if(swl_str_matches(vhtOperChWidth, "1")) {
-        shortGi160 = 0;
+    if(swl_str_matches(vhtOperChWidth, "0") || swl_str_matches(vhtOperChWidth, "1")) {
         vht160 = 0;
     }
 
@@ -403,51 +381,6 @@ static void whm_mxl_rad_configHe6gCapabs(amxd_object_t* pVendorObj, swl_mapChar_
     swl_mapCharFmt_addValInt32(configMap, "he_6ghz_max_ampdu_len_exp", amxd_object_get_value(uint8_t, he6gCapabsObj, "he_6ghz_max_ampdu_len_exp", NULL));
     swl_mapCharFmt_addValInt32(configMap, "he_6ghz_rx_ant_pat", amxd_object_get_value(uint8_t, he6gCapabsObj, "he_6ghz_rx_ant_pat", NULL));
     swl_mapCharFmt_addValInt32(configMap, "he_6ghz_tx_ant_pat", amxd_object_get_value(uint8_t, he6gCapabsObj, "he_6ghz_tx_ant_pat", NULL));
-}
-
-static void s_rad_configEhtCapabs(T_Radio* pRad, swl_mapChar_t* configMap) {
-    ASSERT_NOT_NULL(pRad, , ME, "pRad NULL");
-
-    swl_chanspec_t tgtChspec = wld_chanmgt_getTgtChspec(pRad);
-    swl_bandwidth_e tgtChW = tgtChspec.bandwidth;
-    uint32_t* pChWId = (uint32_t*) swl_table_getMatchingValue(&sChWidthIDsMaps, 0, 2, &tgtChW);
-    uint32_t* pEhtChWId = (uint32_t*) swl_table_getMatchingValue(&sChWidthIDsMaps, 1, 2, &tgtChW);
-    bool implicitBf = (pRad->implicitBeamFormingSupported && pRad->implicitBeamFormingEnabled);
-    bool explicitBf = (pRad->explicitBeamFormingSupported && pRad->explicitBeamFormingEnabled);
-    bool muMimo = (pRad->multiUserMIMOSupported && pRad->multiUserMIMOEnabled);
-
-    if(pEhtChWId) {
-        if(pChWId && (*pChWId != *pEhtChWId)) {
-            tgtChspec.bandwidth = *(uint32_t*) swl_table_getMatchingValue(&sChWidthIDsMaps, 2, 1, pEhtChWId);
-        }
-        swl_channel_t centerChan = swl_chanspec_getCentreChannel(&tgtChspec);
-        swl_mapCharFmt_addValInt32(configMap, "eht_oper_chwidth", *pEhtChWId);
-        swl_mapCharFmt_addValInt32(configMap, "eht_oper_centr_freq_seg0_idx", centerChan);
-    }
-    if(implicitBf) {
-        if(SWL_BIT_IS_SET(pRad->bfCapsSupported[COM_DIR_RECEIVE], RAD_BF_CAP_EHT_SU) &&
-           (SWL_BIT_IS_ONLY_SET(pRad->bfCapsEnabled[COM_DIR_RECEIVE], RAD_BF_CAP_DEFAULT) ||
-            SWL_BIT_IS_SET(pRad->bfCapsEnabled[COM_DIR_RECEIVE], RAD_BF_CAP_EHT_SU))) {
-            swl_mapCharFmt_addValInt32(configMap, "eht_su_beamformee", 1);
-        }
-    }
-    if(explicitBf) {
-        if(SWL_BIT_IS_SET(pRad->bfCapsSupported[COM_DIR_TRANSMIT], RAD_BF_CAP_EHT_SU) &&
-           (SWL_BIT_IS_ONLY_SET(pRad->bfCapsEnabled[COM_DIR_TRANSMIT], RAD_BF_CAP_DEFAULT) ||
-            SWL_BIT_IS_SET(pRad->bfCapsEnabled[COM_DIR_TRANSMIT], RAD_BF_CAP_EHT_SU))) {
-            swl_mapCharFmt_addValInt32(configMap, "eht_su_beamformer", 1);
-        }
-        bool beamformerSupported = (tgtChW <= SWL_BW_80MHZ) ? SWL_BIT_IS_SET(pRad->bfCapsSupported[COM_DIR_TRANSMIT], RAD_BF_CAP_EHT_MU_80MHZ) :
-            (tgtChW == SWL_BW_160MHZ) ? SWL_BIT_IS_SET(pRad->bfCapsSupported[COM_DIR_TRANSMIT], RAD_BF_CAP_EHT_MU_160MHZ) :
-            (tgtChW == SWL_BW_320MHZ) ? SWL_BIT_IS_SET(pRad->bfCapsSupported[COM_DIR_TRANSMIT], RAD_BF_CAP_EHT_MU_320MHZ) : false;
-        bool beamformerEnabled = (tgtChW <= SWL_BW_80MHZ) ? SWL_BIT_IS_SET(pRad->bfCapsEnabled[COM_DIR_TRANSMIT], RAD_BF_CAP_EHT_MU_80MHZ) :
-            (tgtChW == SWL_BW_160MHZ) ? SWL_BIT_IS_SET(pRad->bfCapsEnabled[COM_DIR_TRANSMIT], RAD_BF_CAP_EHT_MU_160MHZ) :
-            (tgtChW == SWL_BW_320MHZ) ? SWL_BIT_IS_SET(pRad->bfCapsEnabled[COM_DIR_TRANSMIT], RAD_BF_CAP_EHT_MU_320MHZ) :
-            SWL_BIT_IS_ONLY_SET(pRad->bfCapsEnabled[COM_DIR_TRANSMIT], RAD_BF_CAP_DEFAULT);
-        if(muMimo && beamformerSupported && beamformerEnabled) {
-            swl_mapCharFmt_addValInt32(configMap, "eht_mu_beamformer", 1);
-        }
-    }
 }
 
 static void whm_mxl_rad_configAxMxlParams(T_Radio* pRad, swl_mapChar_t* configMap) {
@@ -843,12 +776,6 @@ static swl_rc_ne s_mxl_rad_updateConfig(T_Radio* pRad, mxl_VendorData_t* pRadVen
         swl_mapCharFmt_addValStr(configMap, "opmode_notif", "%u", 1);
     }
 
-    /* Force-enable BE if override is enabled */
-    if (whm_mxl_rad_checkForceEnableBe(pRad)) {
-        swl_mapCharFmt_addValInt32(configMap, "ieee80211be", 1);
-        s_rad_configEhtCapabs(pRad, configMap);
-    }
-
 #ifdef CONFIG_VENDOR_MXL_PROPRIETARY
     /* Prepare hostapd_conf ACS parameters */
     whm_mxl_rad_acsUpdateConfigMap(pRad, pRadVendor, configMap);
@@ -879,13 +806,17 @@ static swl_rc_ne s_mxl_rad_updateConfig(T_Radio* pRad, mxl_VendorData_t* pRadVen
         /* Set hostapd_conf first_non_dfs parameters */
         swl_mapCharFmt_addValStr(configMap, "channel", "%s", "first_non_dfs");
     }
+    /* Since MLO is not supported by pwhm Override disable 11be ble*/
+    if (wld_rad_checkEnabledRadStd(pRad, SWL_RADSTD_BE)) {
+        swl_mapCharFmt_addValInt32(configMap, "disable_11be", 0);
+    }
 
     /* Prepare hostapd_conf Bss Color parameters */
     whm_mxl_rad_bssColorUpdateConfigMap(pRadVendor, configMap);
 
     /* Prepare Start After parameters */
     whm_mxl_rad_delayedStartUpdateConfigMap(pRadVendor, configMap);
-
+    
     /* Certification Params*/
     if (whm_mxl_isCertModeEnabled()) {
         whm_mxl_rad_configCertification(pRad, pVendorObj, configMap);
@@ -1014,31 +945,10 @@ static void whm_mxl_vap_softBlockConfig(T_AccessPoint* pAP, amxd_object_t* pVend
 static void s_whm_mxl_vap_securityConfig(T_AccessPoint* pAP, swl_mapChar_t* configMap) {
     SAH_TRACEZ_IN(ME);
     mxl_VapVendorData_t* mxlVapVendorData = mxl_vap_getVapVendorData(pAP);
-    bool forceEnableBe = whm_mxl_rad_checkForceEnableBe(pAP->pRadio);
-    swl_security_mfpMode_e mfp = swl_security_getTargetMfpMode(pAP->secModeEnabled, pAP->mfpConfig);
 
     switch(pAP->secModeEnabled) {
-        case SWL_SECURITY_APMODE_WPA2_WPA3_P:
-            if(forceEnableBe) {
-                swl_mapCharFmt_addValStr(configMap, "wpa_key_mgmt", "%s%s%s",
-                                         ((mfp != SWL_SECURITY_MFPMODE_REQUIRED) ? "WPA-PSK " : ""),
-                                         ((mfp == SWL_SECURITY_MFPMODE_REQUIRED) ? "WPA-PSK-SHA256 " : ""),
-                                         "SAE SAE-EXT-KEY");
-                swl_mapCharFmt_addValStr(configMap, "wpa_pairwise", "%s", "CCMP GCMP-256");
-                swl_mapCharFmt_addValStr(configMap, "rsn_pairwise", "%s", "CCMP GCMP-256");
-                swl_mapChar_add(configMap, "beacon_prot", "1");
-            }
-            break;
+        /* Overwrite 6G sae_pwe to 2, pWHM is setting it to 1 but at the moment its not supported by us */
         case SWL_SECURITY_APMODE_WPA3_P:
-            if(forceEnableBe) {
-                swl_mapCharFmt_addValStr(configMap, "wpa_key_mgmt", "%s%s",
-                                         "SAE SAE-EXT-KEY",
-                                         (pAP->IEEE80211rEnable ? " FT-SAE FT-SAE-EXT-KEY" : ""));
-                swl_mapCharFmt_addValStr(configMap, "wpa_pairwise", "%s", "CCMP GCMP-256");
-                swl_mapCharFmt_addValStr(configMap, "rsn_pairwise", "%s", "CCMP GCMP-256");
-                swl_mapChar_add(configMap, "beacon_prot", "1");
-            }
-            /* Overwrite 6G sae_pwe to 2, pWHM is setting it to 1 but at the moment its not supported by us */
             if(pAP->pFA->mfn_misc_has_support(pAP->pRadio, pAP, "SAE_PWE", 0)) {
                 if(pAP->pRadio->operatingFrequencyBand == SWL_FREQ_BAND_EXT_6GHZ) {
                     SAH_TRACEZ_INFO(ME, "%s Set sae_pwe",pAP->alias);
@@ -1073,14 +983,18 @@ static void s_whm_mxl_vap_securityConfig(T_AccessPoint* pAP, swl_mapChar_t* conf
             /* Overwrite wpa_key_mgmt to SAE-EXT-KEY to support AKM24 */
             if(mxlVapVendorData->saeExtKey) {
                 swl_mapCharFmt_addValStr(configMap, "wpa_key_mgmt", "%s", "SAE-EXT-KEY");
-            }
+                whm_mxl_vap_wpaKeyMgmt(pAP, "SAE-EXT-KEY");
+            } else {
+                whm_mxl_vap_wpaKeyMgmt(pAP, wld_rad_checkEnabledRadStd(pAP->pRadio, SWL_RADSTD_BE) ? (pAP -> IEEE80211rEnable ?
+                        "SAE SAE-EXT-KEY FT-SAE FT-SAE-EXT-KEY" :
+                        "SAE SAE-EXT-KEY") :
+                    (pAP -> IEEE80211rEnable ?
+                        "SAE FT-SAE" :
+                        "SAE")
+                    );
+                }
             break;
         case SWL_SECURITY_APMODE_OWE:
-            if(forceEnableBe) {
-                swl_mapCharFmt_addValStr(configMap, "wpa_pairwise", "%s", "CCMP GCMP-256");
-                swl_mapCharFmt_addValStr(configMap, "rsn_pairwise", "%s", "CCMP GCMP-256");
-                swl_mapChar_add(configMap, "beacon_prot", "1");
-            }
             if(mxlVapVendorData && !swl_str_isEmpty(mxlVapVendorData->OWETransBSSID)) {
                 swl_mapCharFmt_addValStr(configMap, "owe_transition_bssid", "%s", mxlVapVendorData->OWETransBSSID);
             }
@@ -1088,6 +1002,7 @@ static void s_whm_mxl_vap_securityConfig(T_AccessPoint* pAP, swl_mapChar_t* conf
                 /* Hostapd requires OWE Tranisiton SSID to be included in double quotes */
                 swl_mapCharFmt_addValStr(configMap, "owe_transition_ssid", "\"%s\"", mxlVapVendorData->OWETransSSID);
             }
+            whm_mxl_vap_wpaKeyMgmt(pAP, "OWE");
             break;
         case SWL_SECURITY_APMODE_NONE:
             if(mxlVapVendorData && !swl_str_isEmpty(mxlVapVendorData->OWETransBSSID)) {
@@ -1158,11 +1073,16 @@ static void whm_mxl_vap_configCertification(T_AccessPoint* pAP, amxd_object_t* p
     char *setAggrConfig = amxd_object_get_value(cstring_t, pVendorObj, "SetAggrConfig", NULL);
     char *groupMgmtCipher = amxd_object_get_value(cstring_t, pVendorObj, "GroupMgmtCipher", NULL);
     char *groupCipher = amxd_object_get_value(cstring_t, pVendorObj, "GroupCipher", NULL);
+    char *qosMap = amxd_object_get_value(cstring_t, pVendorObj, "QoSMap", NULL);
 
     if(!swl_str_isEmpty(setAggrConfig)) {
         swl_mapCharFmt_addValStr(configMap, "sAggrConfig", "%s", setAggrConfig);
     }
     free(setAggrConfig);
+    if(!swl_str_isEmpty(qosMap)) {
+        swl_mapCharFmt_addValStr(configMap, "qos_map_set", "%s", qosMap);
+    }
+    free(qosMap);
     swl_mapCharFmt_addValInt32(configMap, "s11nProtection", amxd_object_get_value(uint32_t, pVendorObj, "Set11nProtection", NULL));
     swl_mapCharFmt_addValInt32(configMap, "mld_mediumsync_present", amxd_object_get_value(bool, pVendorObj, "MldMediumsyncPresent", NULL));
     swl_mapCharFmt_addValInt32(configMap, "mlo_t2lm_support", amxd_object_get_value(bool, pVendorObj, "MloT2lmSupport", NULL));
@@ -1211,21 +1131,12 @@ static void whm_mxl_vap_configCertification(T_AccessPoint* pAP, amxd_object_t* p
     swl_mapCharFmt_addValInt32(configMap, "tx_queue_data3_aifs", amxd_object_get_value(int32_t, pVendorObj, "TxQueueBKAifs", NULL));
     WHM_MXL_NE_SET_PARAM(amxd_object_get_value(int32_t, pVendorObj, "GasCBDelay", NULL), 0, configMap, "gas_comeback_delay");
     WHM_MXL_NE_SET_PARAM(amxd_object_get_value(bool, pVendorObj, "EhtMacEpcsPrioAccess", NULL), 0, configMap, "eht_mac_epcs_prio_access");
-    WHM_MXL_NE_SET_PARAM(amxd_object_get_value(bool, pVendorObj, "SCSEnable", NULL), 0, configMap, "scs_enable");
 }
 
 static void s_whm_mxl_vap_steeringConfig(T_AccessPoint* pAP, swl_mapChar_t* configMap){
     mxl_VapVendorData_t* mxlVapVendorData = mxl_vap_getVapVendorData(pAP);
     ASSERTS_NOT_NULL(mxlVapVendorData, , ME, "mxlVapVendorData is NULL");
-    /* For certification,
-        ignore_da_timer is explicitly set to false,
-        otherwise value is from internal variable updated from DM.
-    */
-    if (whm_mxl_isCertModeEnabled()) {
-        swl_mapCharFmt_addValInt32(configMap, "ignore_da_timer", false);
-    } else {
-        swl_mapCharFmt_addValInt32(configMap, "ignore_da_timer", mxlVapVendorData->ignore11vDiassoc);
-    }
+    swl_mapCharFmt_addValInt32(configMap, "ignore_da_timer", mxlVapVendorData->ignore11vDiassoc);
 }
 
 static swl_rc_ne s_mxl_vap_updateConfig(T_AccessPoint* pAP, swl_mapChar_t* configMap) {
@@ -1292,16 +1203,19 @@ static swl_rc_ne s_mxl_vap_updateConfig(T_AccessPoint* pAP, swl_mapChar_t* confi
     /* Override pWHM value of use_driver_iface_addr */
     swl_mapCharFmt_addValInt32(configMap, "use_driver_iface_addr", 0);
     /* Since MLO is not supported by pwhm Override disable 11be ble*/
-
-    if(whm_mxl_rad_checkForceEnableBe(pRad)) {
-        /* Force-enable BE stuff if override is enabled */
-        swl_mapChar_delete(configMap, "disable_11be");
-        whm_mxl_vap_mloConfig(pAP, configMap);
-        swl_mapCharFmt_addValInt32(configMap, "disable_beacon_prot", amxd_object_get_value(bool, pVendorObj, "DisableBeaconProtection", NULL));
+    if(wld_rad_checkEnabledRadStd(pRad, SWL_RADSTD_BE)) {
+      swl_mapCharFmt_addValInt32(configMap, "disable_11be", 0);
+      /* MLO Parameters*/
+      whm_mxl_vap_mloConfig(pAP, configMap);
+      /* Disable Beacon Protection is only supported for 11be */
+      swl_mapCharFmt_addValInt32(configMap, "disable_beacon_prot", amxd_object_get_value(bool, pVendorObj, "DisableBeaconProtection", NULL));
     }
-
     /* Steering parameters */
     s_whm_mxl_vap_steeringConfig(pAP, configMap);
+
+    /* SCS Parameters */
+    WHM_MXL_NE_SET_PARAM(amxd_object_get_value(bool, pVendorObj, "SCSEnable", NULL), 0, configMap, "scs_enable");
+    WHM_MXL_NE_SET_PARAM(amxd_object_get_value(bool, pVendorObj, "MSCSEnable", NULL), 0, configMap, "mscs_enable");
 
     /* Certification Params*/
     if (whm_mxl_isCertModeEnabled()) {
@@ -1324,8 +1238,10 @@ static swl_rc_ne s_mxl_vap_updateDummyVapConfig(T_AccessPoint* pAP, swl_mapChar_
         SAH_TRACEZ_INFO(ME,"%s: Deleting start_disabled for dummy vap due to at least on AP enabled on radio", pAP->alias);
         swl_mapChar_delete(configMap, "start_disabled");
     }
-    if(whm_mxl_rad_checkForceEnableBe(pRad)) {
-        swl_mapChar_delete(configMap, "disable_11be");
+
+    /* Since MLO is not supported by pwhm Override disable 11be ble*/
+    if (wld_rad_checkEnabledRadStd(pRad, SWL_RADSTD_BE)) {
+        swl_mapCharFmt_addValInt32(configMap, "disable_11be", 0);
     }
     /* disable pbac option in dummy vap regardless of config as it is not needed */
     swl_mapCharFmt_addValInt32(configMap, "disable_pbac", 1);

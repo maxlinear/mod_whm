@@ -18,6 +18,9 @@
                 object IEEE80211u {
                     parameter InterworkingEnable = 1;
                 }
+                object Vendor {
+                    parameter EnableBssLoad = true;
+                }
 {% if (!(BDfn.isInterfaceGuest(Itf.Name))) : %}
                 object WPS {
                     {% if ( Itf.OperatingFrequency != "6GHz" ) : %}
@@ -34,8 +37,9 @@
                 }
 {% else %}
                 object Security {
-                    parameter ModesAvailable = "None,WPA2-Personal,WPA3-Personal,WPA2-WPA3-Personal,WPA2-Enterprise,OWE";
+                    parameter ModesAvailable = "None,WPA-WPA2-Personal,WPA2-Personal,WPA3-Personal,WPA2-WPA3-Personal,WPA2-Enterprise,WPA-WPA2-Enterprise,OWE";
                 }
+
 {% endif %}
             }
 {% endif; endfor; %}

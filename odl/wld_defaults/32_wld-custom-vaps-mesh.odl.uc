@@ -8,6 +8,9 @@
                 object IEEE80211u {
                     parameter InterworkingEnable = 1;
                 }
+                object Vendor {
+                    parameter EnableBssLoad = true;
+                }
 {% if (!(BDfn.isInterfaceGuest(Itf.Name))) : %}
                 object WPS {
                     {% if ( Itf.OperatingFrequency != "6GHz" ) : %}

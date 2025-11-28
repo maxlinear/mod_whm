@@ -62,7 +62,6 @@ typedef struct mxl_dmnMngrCtx {
 
 mxl_dmnMngrCtx_t* whm_mxl_dmnMngr_getDmnCtx(const char* dmnName);
 void whm_mxl_dmnMngr_setDmnCtxState(mxl_dmnMngrCtx_t* pDmnCtx , mxl_secDmn_state_t state);
-mxl_secDmn_state_t whm_mxl_dmnMngr_getDmnCtxState(mxl_dmnMngrCtx_t* pDmnCtx);
 void whm_mxl_dmnMngr_setDmnCtxGlbHpd(mxl_dmnMngrCtx_t* pDmnCtx , bool set);
 bool whm_mxl_dmnMngr_isDmnCtxGlbHpd(mxl_dmnMngrCtx_t* pDmnCtx);
 swl_rc_ne whm_mxl_dmnMngr_setDmnExecSettings(vendor_t* pVdr, const char* dmnName, wld_dmnMgt_dmnExecSettings_t* pCfg);

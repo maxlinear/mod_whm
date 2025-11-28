@@ -58,6 +58,8 @@ typedef struct {
     bool ignore11vDiassoc;
     /* MLD Link info */
     whm_mxl_mlo_link_t mldLink; 
+    /* Setting the QoS Map */
+    char QoSMap[70];
 } mxl_VapVendorData_t;
 
 /* Macros Section */
@@ -87,5 +89,6 @@ swl_rc_ne whm_mxl_vap_postUpActions(T_AccessPoint* pAP);
 swl_rc_ne whm_mxl_vap_postDownActions(T_AccessPoint* pAP);
 void whm_mxl_registerToWdsEvent(void);
 void whm_mxl_unregisterToWdsEvent(void);
+swl_rc_ne whm_mxl_vap_wpaKeyMgmt (T_AccessPoint* pAP, const char* paramValue);
 
 #endif /* __WHM_MXL_VAP_H__ */

@@ -87,15 +87,6 @@
                     on action validate call check_range { min = 0, max = 60 };
                 }
                 /**
-                 * Override enabling IEEE 802.11be functionality
-                 * If true  - Enabled regardless of pWHM's Configuration (Radio should have BE enabled)
-                 * If false - Enabled/Disabled by pWHM
-                 * NOTE: Should be remove/deprecated once MxL adapts pWHM's BE support.
-                 */
-                %persistent bool Enable80211BeOverride {
-                    default true;
-                }
-                /**
                  * Set first non DFS channel. This mode will be valid only if AutoChannelEnable will be disabled
                  */
                 %persistent bool FirstNonDfs = 0 {
@@ -721,7 +712,7 @@
                     */
                     %persistent uint16 AcsBgScanInterval {
                         on action validate call whm_mxl_rad_validateBgAcsInterval_pvf;
-                        default 60;
+                        default 0;
                     }
                     /*
                     * The below Three parameters are only for
@@ -924,6 +915,15 @@
             %persistent object Vendor {
                 on event "*" call whm_mxl_vap_setVapVendorObj_ocf;
 
+                /* Functions - defined here */
+                /**
+                * It sets the qos_map_set in the hostapd
+                * @param QoSMap The values of the qos map which needs to be
+                * set in the hostapd for vap
+                * @return Success if the command is applied.
+                */
+                bool updateQoSMap(%in %mandatory string QoSMap) <!import:${module}:_whm_mxl_updateQoSMap!>;
+
                 /* enable_hairpin */
                 %persistent bool EnableHairpin {
                     default 0;
@@ -1124,6 +1124,12 @@
                 %persistent bool EnableWPA3PersonalCompatibility {
                     default false;
                 }
+                %persistent bool SCSEnable {
+                    default 0;
+                }
+                %persistent bool MSCSEnable {
+                    default 0;
+                }
                 /*
                 * The below parameters are required for
                 * Certification configurations
@@ -1273,8 +1279,8 @@
                 %persistent bool H2eRequired {
                     default 0;
                 }
-                %persistent bool SCSEnable {
-                    default 0;
+                %persistent string QoSMap {
+                    default "";
                 }
                 /* Certification parameters ends here */
                 %persistent object Steering {
@@ -1282,7 +1288,7 @@
 
                     /* Enable or disable 11V Diassociation Timer in BTM request */
                     %persistent bool Ignore11vDiassoc {
-                        default 1;
+                        default 0;
                     }
                 }
             }

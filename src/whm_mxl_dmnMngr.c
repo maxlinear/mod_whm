@@ -81,19 +81,16 @@ static char* s_getGlobHapdArgsCb(wld_secDmnGrp_t* pSecDmnGrp, void* userData _UN
     return args;
 }
 
-static bool s_isHapdIfaceStartable(wld_secDmnGrp_t* pSecDmnGrp _UNUSED, void* userData _UNUSED, wld_secDmn_t* pSecDmn) {
-    ASSERT_NOT_NULL(pSecDmn, false, ME, "NULL");
-    T_Radio* pRad = (T_Radio*) pSecDmn->userData;
-    ASSERT_TRUE(debugIsRadPointer(pRad), false, ME, "INVALID");
-    ASSERT_NOT_NULL(pRad, false, ME, "pRad is NULL");
-    ASSERT_NOT_NULL(pRad->hostapd, false, ME, "pRad->hostapd is NULL");
-    return (amxd_object_get_bool(pRad->pBus, "Enable", NULL) && wld_rad_hasEnabledVap(pRad));
+static char* s_getArgsProcCb(wld_process_t* pProc, void* userdata) {
+    wld_secDmnGrp_t* pSecDmnGrp = (wld_secDmnGrp_t*) userdata;
+    ASSERT_NOT_NULL(pSecDmnGrp, NULL, ME, "NULL");
+    return s_getGlobHapdArgsCb(pSecDmnGrp, NULL, pProc);
 }
 
-static wld_secDmnGrp_EvtHandlers_t sGlbHapdEvtCbs = {
-    .getArgsCb = s_getGlobHapdArgsCb,
-    .isMemberStartableCb = s_isHapdIfaceStartable,
-};
+static mxl_secDmn_state_t s_getDmnCtxState(mxl_dmnMngrCtx_t* pDmnCtx) {
+    ASSERT_NOT_NULL(pDmnCtx, MXL_SECDMN_STATE_ERROR, ME, "pDmnCtx is NULL");
+    return pDmnCtx->state;
+}
 
 static bool s_isGlbHapdEnabled() {
     /* Global hostapd status is taken from generic dmn context */
@@ -106,45 +103,91 @@ static bool s_isGlbHapdEnabled() {
     return ((genDmnCntx->exec.useGlobalInstance == SWL_TRL_TRUE) || ((genDmnCntx->exec.useGlobalInstance == SWL_TRL_AUTO) && gHapd->globalDmnRequired));
 }
 
-static void s_initMultipleHapdArgs(T_Radio* pRad) {
-    ASSERT_NOT_NULL(pRad, , ME, "pRad is NULL");
-    char confFilePath[128] = {0};
-    char startArgs[128] = {0};
-    swl_str_catFormat(confFilePath, sizeof(confFilePath), HOSTAPD_CONF_FILE_PATH_FORMAT, pRad->Name);
-    s_initHapdStartArgs(startArgs);
-    swl_strlst_cat(startArgs, sizeof(startArgs), " ", confFilePath);
-    ASSERTS_NOT_NULL(pRad->hostapd, , ME, "%s: hostapd not initialized yet", pRad->Name);
-    ASSERTS_NOT_NULL(pRad->hostapd->selfDmnProcess, , ME, "secDmn self process is NULL");
-    SAH_TRACEZ_INFO(ME, "%s: HOSTAPD startingArgs=%s", pRad->Name, startArgs);
-    wld_dmn_setArgList(pRad->hostapd->selfDmnProcess, startArgs);
-}
-
-static void s_setHapdDmnStartArgs(vendor_t* pVdr) {
-    ASSERT_NOT_NULL(pVdr, , ME, "pVdr is NULL");
-    bool enableGlobHapd = s_isGlbHapdEnabled();
-    mxl_dmnMngrCtx_t* pDmnCtx = whm_mxl_dmnMngr_getDmnCtx(MXL_HOSTAPD);
+static void s_restartHapd(mxl_dmnMngrCtx_t* pDmnCtx) {
     ASSERT_NOT_NULL(pDmnCtx, , ME, "pDmnCtx is NULL");
-    whm_mxl_dmnMngr_setDmnCtxGlbHpd(pDmnCtx, enableGlobHapd);
-    ASSERTS_TRUE((whm_mxl_dmnMngr_getDmnCtxState(pDmnCtx) == MXL_SECDMN_STATE_RST), ,ME ,"Hostapd args already initialized");
-    if (!enableGlobHapd) {
-        T_Radio* pRad;
-        wld_for_eachRad(pRad) {
-            if (pRad && pRad->pBus) {
-                s_initMultipleHapdArgs(pRad);
+    bool isGlobalHapd = whm_mxl_dmnMngr_isDmnCtxGlbHpd(pDmnCtx);
+    T_Radio* pRad;
+    wld_for_eachRad(pRad) {
+        if (pRad && pRad->pBus) {
+            whm_mxl_restartHapd(pRad);
+            if (isGlobalHapd) {
+                break;
             }
         }
-        /* Set ZWDFS sec daemon starting args */
-        T_Radio* zwdfsRadio = mxl_rad_getZwDfsRadio();
-        ASSERT_NOT_NULL(zwdfsRadio, , ME, "zwdfsRadio is NULL");
-        s_initMultipleHapdArgs(zwdfsRadio);
-    } else {
-        wld_dmnMgt_dmnExecInfo_t* gHapd = pVdr->globalHostapd;
-        ASSERTS_NOT_NULL(gHapd, , ME, "No glob hapd ctx");
-        if(wld_secDmnGrp_isEnabled(gHapd->pGlobalDmnGrp) != enableGlobHapd) {
-            wld_secDmnGrp_setEvtHandlers(gHapd->pGlobalDmnGrp, &sGlbHapdEvtCbs, pVdr);
+    }
+    T_Radio* zwdfsRadio = mxl_rad_getZwDfsRadio();
+    if (!isGlobalHapd && zwdfsRadio) {
+        whm_mxl_restartHapd(zwdfsRadio);
+    }
+}
+
+static char* s_getHapdArgsCb(wld_secDmn_t* pSecDmn, void* userdata _UNUSED) {
+    char* args = NULL;
+    ASSERT_NOT_NULL(pSecDmn, args, ME, "NULL");
+    char startArgs[128] = {0};
+    s_initHapdStartArgs(startArgs);
+    swl_strlst_cat(startArgs, sizeof(startArgs), " ", pSecDmn->cfgFile);
+    swl_str_copyMalloc(&args, startArgs);
+    return args;
+}
+
+static void s_setGrpHapdStartArgs(vendor_t* pVdr, mxl_dmnMngrCtx_t* pDmnCtx) {
+    ASSERT_NOT_NULL(pVdr, , ME, "pVdr is NULL");
+    ASSERT_NOT_NULL(pDmnCtx, , ME, "pDmnCtx is NULL");
+    bool enableGlobHapd = s_isGlbHapdEnabled();
+    ASSERTI_TRUE(enableGlobHapd, , ME, "not single hostapd");
+    wld_dmnMgt_dmnExecInfo_t* gHapd = pVdr->globalHostapd;
+    ASSERTS_NOT_NULL(gHapd, , ME, "No glob hapd ctx");
+    if(wld_secDmnGrp_isEnabled(gHapd->pGlobalDmnGrp) != enableGlobHapd) {
+        wld_process_t* dmnProc = wld_secDmnGrp_getProc(gHapd->pGlobalDmnGrp);
+        ASSERT_NOT_NULL(dmnProc, , ME, "dmnProc is NULL");
+        wld_deamonEvtHandlers handlers = dmnProc->handlers;
+        handlers.getArgsCb = s_getArgsProcCb;
+        if(!wld_dmn_setDeamonEvtHandlers(dmnProc, &handlers, gHapd->pGlobalDmnGrp)) {
+            SAH_TRACEZ_ERROR(ME, "Failed to set global hostapd event handlers");
         }
     }
+}
+
+static void s_setMultiHapdArgs(void) {
+    T_Radio* pRad;
+    wld_for_eachRad(pRad) {
+        if (pRad && pRad->pBus) {
+            wld_secDmn_t* pSecDmn = pRad->hostapd;
+            if (!pSecDmn) {
+                SAH_TRACEZ_ERROR(ME, "%s: pSecDmn is NULL", pRad->Name);
+                continue;
+            }
+            wld_secDmnEvtHandlers handlers = pSecDmn->handlers;
+            handlers.getArgs = s_getHapdArgsCb;
+            wld_secDmn_setEvtHandlers(pRad->hostapd, &handlers, pRad);
+        }
+    }
+    /* Set ZWDFS sec daemon starting args */
+    T_Radio* zwdfsRadio = mxl_rad_getZwDfsRadio();
+    ASSERTI_NOT_NULL(zwdfsRadio, , ME, "No zwdfs radio");
+    wld_secDmn_t* pSecDmn = zwdfsRadio->hostapd;
+    ASSERTI_NOT_NULL(pSecDmn, , ME, "pSecDmn is NULL for zwdfs radio");
+    wld_secDmnEvtHandlers handlers = pSecDmn->handlers;
+    handlers.getArgs = s_getHapdArgsCb;
+    wld_secDmn_setEvtHandlers(zwdfsRadio->hostapd, &handlers, zwdfsRadio);
+}
+
+static void s_initHapdDmnStartArgs(vendor_t* pVdr, mxl_dmnMngrCtx_t* pDmnCtx) {
+    ASSERT_NOT_NULL(pVdr, , ME, "pVdr is NULL");
+    ASSERT_NOT_NULL(pDmnCtx, , ME, "pDmnCtx is NULL");
+    bool enableGlobHapd = s_isGlbHapdEnabled();
+    whm_mxl_dmnMngr_setDmnCtxGlbHpd(pDmnCtx, enableGlobHapd);
+    ASSERTI_TRUE((s_getDmnCtxState(pDmnCtx) == MXL_SECDMN_STATE_RST), ,ME ,"Hostapd args already initialized");
+    if (enableGlobHapd) {
+        // Single hostapd
+        s_setGrpHapdStartArgs(pVdr, pDmnCtx);
+    } else {
+        // Multiple hostapd
+        s_setMultiHapdArgs();
+    }
     whm_mxl_dmnMngr_setDmnCtxState(pDmnCtx, MXL_SECDMN_STATE_READY);
+    SAH_TRACEZ_INFO(ME, "Initialize %s hostapd daemon done", (enableGlobHapd ? "global" : "multiple"));
 }
 
 static void s_whm_mxl_restartAllSupplicants() {
@@ -174,9 +217,16 @@ static void s_setDmnCtxDefaults(mxl_dmnMngrCtx_t* pDmnCtx) {
     pDmnCtx->isGlbDmn = false;
     pDmnCtx->state = MXL_SECDMN_STATE_RST;
     pDmnCtx->initPending = true;
-    pDmnCtx->dmnExecutionSettings.logOutputPath = DMN_OUTPUT_STDOUT;
-    pDmnCtx->dmnExecutionSettings.logDebugLevel = DMN_DEBUG_LEVEL_MSGDUMP;
+    pDmnCtx->dmnExecutionSettings.logOutputPath = DMN_OUTPUT_SYSLOG;
+    pDmnCtx->dmnExecutionSettings.logDebugLevel = DMN_DEBUG_LEVEL_INFO;
     pDmnCtx->dmnExecutionSettings.wpaSupplicantMasterMode = false;
+}
+
+static void s_initHapd(mxl_dmnMngrCtx_t* pDmnCtx) {
+    ASSERT_NOT_NULL(pDmnCtx, , ME, "pDmnCtx is NULL");
+    vendor_t* pVdr = wld_getVendorByName(MXL_VENDOR_NAME);
+    ASSERT_NOT_NULL(pVdr, , ME, "pVdr is NULL");
+    s_initHapdDmnStartArgs(pVdr, pDmnCtx);
 }
 
 static void s_addDmnInst_oaf(void* priv _UNUSED, amxd_object_t* object, const amxc_var_t* const initialParamValues _UNUSED) {
@@ -193,6 +243,9 @@ static void s_addDmnInst_oaf(void* priv _UNUSED, amxd_object_t* object, const am
     object->priv = pDmnCtx;
     pDmnCtx->object = object;
     s_setDmnCtxDefaults(pDmnCtx);
+    if (swl_str_matches(pDmnCtx->name, MXL_HOSTAPD)) {
+        swla_delayExec_add((swla_delayExecFun_cbf) s_initHapd, pDmnCtx);
+    }
     SAH_TRACEZ_OUT(ME);
 }
 
@@ -273,32 +326,9 @@ static void s_setDmnExecOptsObj_ocf(void* priv _UNUSED, amxd_object_t* object, c
                                                         pDmnCtx->dmnExecutionSettings.logDebugLevel,
                                                         pDmnCtx->dmnExecutionSettings.wpaSupplicantMasterMode);
 
-    vendor_t* pVendor = wld_getVendorByName(MXL_VENDOR_NAME);
-    ASSERT_NOT_NULL(pVendor, , ME, "pVendor is NULL");
-    if ((whm_mxl_dmnMngr_getDmnCtxState(pDmnCtx) == MXL_SECDMN_STATE_RST) && pDmnCtx->initPending) {
-    /* Set daemon starting args after all DM has been loaded */
+    if (s_getDmnCtxState(pDmnCtx) == MXL_SECDMN_STATE_READY) {
         if (swl_str_matches(pDmnCtx->name, MXL_HOSTAPD)) {
-            swla_delayExec_add((swla_delayExecFun_cbf) s_setHapdDmnStartArgs, pVendor);
-            pDmnCtx->initPending = false;
-        }
-    } else if (whm_mxl_dmnMngr_getDmnCtxState(pDmnCtx) == MXL_SECDMN_STATE_READY) {
-        /* Update starting args and restart all radios in case of change
-         * Note that for single hostapd, updating arguments is not needed since the getArgsCb will take
-         * care of setting the new arguments upon hostapd restart.
-         */
-        if (swl_str_matches(pDmnCtx->name, MXL_HOSTAPD)) {
-            if (!whm_mxl_dmnMngr_isDmnCtxGlbHpd(pDmnCtx)) {
-                whm_mxl_dmnMngr_setDmnCtxState(pDmnCtx, MXL_SECDMN_STATE_RST);
-                s_setHapdDmnStartArgs(pVendor);
-            }
-            T_Radio* pRad;
-            wld_for_eachRad(pRad) {
-                if (pRad && pRad->pBus) {
-                    SAH_TRACEZ_INFO(ME, "Restarting hostapd from %s", pRad->Name);
-                    whm_mxl_restartHapd(pRad);
-                    break;
-                }
-            }
+            s_restartHapd(pDmnCtx);
         } else if (swl_str_matches(pDmnCtx->name, MXL_WPASUPPLICANT)) {
             if (suppMasterModeChanged) {
                 /* restart all wpa_supplicants when Supplicant Master Mode is changed */
@@ -322,11 +352,6 @@ void whm_mxl_dmnMngr_setDmnCtxState(mxl_dmnMngrCtx_t* pDmnCtx , mxl_secDmn_state
     ASSERTS_TRUE(state < MXL_SECDMN_STATE_MAX, ,ME, "Bad state set request");
     SAH_TRACEZ_INFO(ME, "Setting dmn:%s state (%d) --> (%d)", pDmnCtx->name, pDmnCtx->state, state);
     pDmnCtx->state = state;
-}
-
-mxl_secDmn_state_t whm_mxl_dmnMngr_getDmnCtxState(mxl_dmnMngrCtx_t* pDmnCtx) {
-    ASSERT_NOT_NULL(pDmnCtx, MXL_SECDMN_STATE_ERROR, ME, "pDmnCtx is NULL");
-    return pDmnCtx->state;
 }
 
 void whm_mxl_dmnMngr_setDmnCtxGlbHpd(mxl_dmnMngrCtx_t* pDmnCtx , bool set) {
@@ -363,7 +388,7 @@ static bool s_initWpaSuppStartingArgs(char* startArgs) {
             ret = swl_str_copy(startArgs, sizeof(startArgs), WPASUPP_DEFAULT_START_ARGS);
             break;
     }
-    if(pDmnCtx->dmnExecutionSettings.logDebugLevel == DMN_OUTPUT_SYSLOG) {
+    if(pDmnCtx->dmnExecutionSettings.logOutputPath == DMN_OUTPUT_SYSLOG) {
         swl_strlst_cat(startArgs, sizeof(startArgs), "", "s");
     }
     ASSERTI_TRUE(ret, false, ME, "Copy error into wpa supplicant args");
@@ -386,7 +411,6 @@ swl_rc_ne s_writeWpaSuppArgsToBuf(char* args, size_t argsSize, char* confFilePat
     ret = s_initWpaSuppStartingArgs(args);
     ASSERTI_TRUE(ret, SWL_RC_ERROR, ME, "%s: writing wpa supplicant args error", pEP->Name);
     mxl_dmnMngrCtx_t* pDmnCtx = whm_mxl_dmnMngr_getDmnCtx(MXL_WPASUPPLICANT);
-    ASSERT_NOT_NULL(pDmnCtx, SWL_RC_ERROR, ME, "pDmnCtx is NULL");
 
     if (pDmnCtx->dmnExecutionSettings.wpaSupplicantMasterMode) {
         if(!swl_str_isEmpty(pEP->bridgeName)) {

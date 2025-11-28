@@ -3,11 +3,13 @@
         object Radio {
 {% for ( let Radio in BD.Radios ) : %}
             object '{{Radio.Alias}}' {
-                parameter OperatingStandardsFormat = "Legacy";
-                parameter OperatingStandards = "be";
                 parameter RegulatoryDomain = "US";
                 parameter DTIMPeriod = 2;
                 parameter MultiUserMIMOEnabled = 1;
+                object ChannelMgt {
+                    parameter AcsBootChannel = -1;
+                }
+                parameter ExternalAcsMgmt = false;
             }
 {% if (Radio.OperatingFrequency == "5GHz") : %}
             object '{{Radio.Alias}}' {
