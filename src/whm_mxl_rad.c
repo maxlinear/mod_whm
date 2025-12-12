@@ -1654,7 +1654,6 @@ swl_rc_ne whm_mxl_rad_startPltfACS(T_Radio* pRad , const amxc_var_t* const args)
         SAH_TRACEZ_INFO(ME, "%s: ACS Exclude OpClass/Channel list is empty, unsetting ACS exclusion channel list", pRad->Name);
         if (ctrlIfaceReady && radioIsAlive) {
             whm_mxl_hostapd_sendCommand(masterVap, "ACS_EX_OP_LIST 0 0", "Unset ACS exclusion channel list");
-            whm_mxl_hostapd_sendCommand(masterVap, "CHAN_SWITCH 5 0", "Trigger ACS");
         } else {
             SAH_TRACEZ_ERROR(ME, "%s: Unable to execute ACS exclusion channel list unset command: ctrlIfaceReady=%d, radioIsAlive=%d",
                              pRad->Name, ctrlIfaceReady, radioIsAlive);
@@ -1722,7 +1721,6 @@ swl_rc_ne whm_mxl_rad_startPltfACS(T_Radio* pRad , const amxc_var_t* const args)
             swl_str_catFormat(formattedCmd, formatSize, "ACS_EX_OP_LIST %u %s", listCount, cmd);
             whm_mxl_hostapd_sendCommand(masterVap, formattedCmd, "Set ACS exclusion channel list");
             free(formattedCmd);
-            whm_mxl_hostapd_sendCommand(masterVap, "CHAN_SWITCH 5 0", "Trigger ACS");
         } else {
             SAH_TRACEZ_ERROR(ME, "%s: Unable to execute ACS exclusion channel list set command: ctrlIfaceReady=%d, radioIsAlive=%d",
                              pRad->Name, ctrlIfaceReady, radioIsAlive);
@@ -1749,6 +1747,12 @@ int whm_mxl_rad_autoChannelEnable(T_Radio* pRad, int enable, int set) {
 
     if(set & SET) {
         pRad->autoChannelSetByUser = pRad->autoChannelEnable = enable;
+
+        if (enable == 0) {
+            // Unset ACS exclusion channel list when auto channel is disabled
+            SAH_TRACEZ_INFO(ME, "%s: Auto channel disabled, unsetting ACS exclusion channel list", pRad->Name);
+            whm_mxl_rad_startPltfACS(pRad, NULL);
+        }
 
         if (pRadVendor) {
             whm_mxl_configureBgAcs(pRad, (enable ? pRadVendor->bgAcsInterval : 0));
