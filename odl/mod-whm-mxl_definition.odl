@@ -101,6 +101,15 @@
                     on action validate call check_range { min = 0, max = 60 };
                 }
                 /**
+                 * Override enabling IEEE 802.11be functionality
+                 * If true  - Enabled regardless of pWHM's Configuration (Radio should have BE enabled)
+                 * If false - Enabled/Disabled by pWHM
+                 * NOTE: Should be remove/deprecated once MxL adapts pWHM's BE support.
+                 */
+                %persistent bool Enable80211BeOverride {
+                    default true;
+                }
+                /**
                  * Set first non DFS channel. This mode will be valid only if AutoChannelEnable will be disabled
                  */
                 %persistent bool FirstNonDfs = 0 {

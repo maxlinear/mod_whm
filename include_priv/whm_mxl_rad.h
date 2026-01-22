@@ -55,8 +55,8 @@ typedef struct {
      /* CCA Threhshold */
     int ccaTh[CCA_TH_SIZE];
 
-    /* Indicates whether IEEE 802.11be functionality is enabled */
-    bool isIEEE80211BeEnabled;
+    /* Indicates if IEEE 802.11 BE Functionality is force-enabled by mod_whm */
+    bool enable80211BeOverride;
 
     /* First non DFS Channel */
     bool firstNonDfs;
@@ -138,5 +138,6 @@ void whm_mxl_rad_requestReconf(T_Radio* pRad);
 void whm_mxl_rad_requestSync(T_Radio* pRad);
 swl_rc_ne whm_mxl_rad_getTxPowerdBm(T_Radio* rad, int32_t* dbm);
 swl_rc_ne whm_mxl_rad_getMaxTxPowerdBm(T_Radio* pRad, uint16_t channel, int32_t* dbm);
+bool whm_mxl_rad_checkForceEnableBe(T_Radio* pRad);
 
 #endif /* __WHM_MXL_RAD_H__ */
