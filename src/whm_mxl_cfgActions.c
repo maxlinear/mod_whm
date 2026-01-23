@@ -1151,11 +1151,11 @@ swl_rc_ne whm_mxl_toggleWPA3PersonalCompatibility(T_AccessPoint* pAP) {
     ASSERTI_TRUE(wld_secDmn_isAlive(pRad->hostapd), SWL_RC_ERROR, ME, "hostapd not active");
 
     const char* secApParams[] = {
-        "wpa", "wpa_key_mgmt", "rsn_pairwise", "group_cipher",
+        "wpa", "wpa_key_mgmt", "wpa_pairwise", "rsn_pairwise", "group_cipher",
         "ieee80211w", "sae_pwe", "sae_require_mfp",
-        "rsn_override_key_mgmt", "rsn_override_pairwise",
-        "rsn_override_mfp", "rsn_override_key_mgmt_2",
-        "rsn_override_pairwise_2", "rsn_override_mfp_2"
+        "rsn_override_mfp", "rsn_override_mfp_2", "rsn_override_omit_rsnxe",
+        "rsn_override_key_mgmt_2", "rsn_override_key_mgmt",
+        "rsn_override_pairwise_2", "rsn_override_pairwise"
     };
 
     whm_mxl_set_vendorMultipleParams(pAP, secApParams, SWL_ARRAY_SIZE(secApParams));

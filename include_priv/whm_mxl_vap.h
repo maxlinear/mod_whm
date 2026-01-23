@@ -60,6 +60,8 @@ typedef struct {
     whm_mxl_mlo_link_t mldLink; 
     /* Setting the QoS Map */
     char QoSMap[70];
+    /* Setting the Wildcard SSID */
+    uint8_t hiddenSSIDType;
 } mxl_VapVendorData_t;
 
 /* Macros Section */

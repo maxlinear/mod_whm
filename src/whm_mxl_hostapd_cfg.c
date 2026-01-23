@@ -1131,22 +1131,30 @@ static void s_whm_mxl_vap_securityConfig(T_AccessPoint* pAP, swl_mapChar_t* conf
 
         // Set common defaults
         swl_mapCharFmt_addValStr(configMap, "wpa", "%s", "2");
+        swl_mapCharFmt_addValStr(configMap, "wpa_pairwise", "%s", "CCMP");
         swl_mapCharFmt_addValStr(configMap, "rsn_pairwise", "%s", "CCMP");
         swl_mapCharFmt_addValStr(configMap, "group_cipher", "%s", "CCMP");
         swl_mapCharFmt_addValStr(configMap, "sae_pwe", "%s", "1");
         swl_mapCharFmt_addValStr(configMap, "sae_require_mfp", "%s", "1");
-        swl_mapCharFmt_addValStr(configMap, "rsn_override_key_mgmt_2", "%s", "SAE-EXT-KEY");
-        swl_mapCharFmt_addValStr(configMap, "rsn_override_pairwise_2", "%s", "GCMP-256");
-        swl_mapCharFmt_addValStr(configMap, "rsn_override_mfp_2", "%s", "2");
- 
+        if (wld_rad_checkEnabledRadStd(pAP->pRadio, SWL_RADSTD_BE)) {
+            swl_mapCharFmt_addValStr(configMap, "rsn_override_pairwise_2", "%s", "GCMP-256");
+            swl_mapCharFmt_addValStr(configMap, "rsn_override_key_mgmt_2", "%s", "SAE-EXT-KEY");
+            swl_mapCharFmt_addValStr(configMap, "rsn_override_mfp_2", "%s", "2");
+        }
+
         // Set band specific defaults
         if (pAP->pRadio->operatingFrequencyBand == SWL_FREQ_BAND_EXT_2_4GHZ ||
             pAP->pRadio->operatingFrequencyBand == SWL_FREQ_BAND_EXT_5GHZ) {
+
+            if(pAP->mfpConfig == SWL_SECURITY_MFPMODE_DISABLED) {
+                mfp = (pAP->mboEnable ? SWL_SECURITY_MFPMODE_OPTIONAL : SWL_SECURITY_MFPMODE_DISABLED);
+            }
             swl_mapCharFmt_addValStr(configMap, "wpa_key_mgmt", "%s", "WPA-PSK");
-            swl_mapCharFmt_addValStr(configMap, "ieee80211w", "%s", "0");
+            swl_mapCharFmt_addValInt32(configMap, "ieee80211w", mfp);
             swl_mapCharFmt_addValStr(configMap, "rsn_override_key_mgmt", "%s", "SAE");
             swl_mapCharFmt_addValStr(configMap, "rsn_override_pairwise", "%s", "CCMP");
             swl_mapCharFmt_addValStr(configMap, "rsn_override_mfp", "%s", "2");
+            swl_mapCharFmt_addValStr(configMap, "rsn_override_omit_rsnxe", "%s", "1");
         } else if (pAP->pRadio->operatingFrequencyBand == SWL_FREQ_BAND_EXT_6GHZ) {
             swl_mapCharFmt_addValStr(configMap, "wpa_key_mgmt", "%s", "SAE");
             swl_mapCharFmt_addValStr(configMap, "ieee80211w", "%s", "2");
@@ -1154,6 +1162,18 @@ static void s_whm_mxl_vap_securityConfig(T_AccessPoint* pAP, swl_mapChar_t* conf
     }
 
     SAH_TRACEZ_OUT(ME);
+}
+
+static void whm_mxl_vap_hidden_ssid_type(T_AccessPoint* pAP, amxd_object_t* pVendorObj, swl_mapChar_t* configMap) {
+    ASSERT_NOT_NULL(pVendorObj, , ME, "pVendorObj is NULL");
+    mxl_VapVendorData_t* mxlVapVendorData = mxl_vap_getVapVendorData(pAP);
+    ASSERTS_NOT_NULL(mxlVapVendorData, , ME, "mxlVapVendorData is NULL");
+
+    if(!pAP->SSIDAdvertisementEnabled && (mxlVapVendorData->hiddenSSIDType != 0)) {
+        SAH_TRACEZ_INFO(ME, "%s Overriding the ignore_broadcast_ssid",pAP->alias);
+        swl_mapChar_delete(configMap, "ignore_broadcast_ssid");
+        swl_mapCharFmt_addValInt32(configMap, "ignore_broadcast_ssid", mxlVapVendorData->hiddenSSIDType);
+    }
 }
 
 static void whm_mxl_vap_configCertification(T_AccessPoint* pAP, amxd_object_t* pVendorObj, swl_mapChar_t* configMap) {
@@ -1307,6 +1327,9 @@ static swl_rc_ne s_mxl_vap_updateConfig(T_AccessPoint* pAP, swl_mapChar_t* confi
     /* SCS Parameters */
     WHM_MXL_NE_SET_PARAM(amxd_object_get_value(bool, pVendorObj, "SCSEnable", NULL), 0, configMap, "scs_enable");
     WHM_MXL_NE_SET_PARAM(amxd_object_get_value(bool, pVendorObj, "MSCSEnable", NULL), 0, configMap, "mscs_enable");
+
+    /* Setting the WildCard SSID */
+    whm_mxl_vap_hidden_ssid_type(pAP, pVendorObj, configMap);
 
     /* Certification Params*/
     if (whm_mxl_isCertModeEnabled()) {

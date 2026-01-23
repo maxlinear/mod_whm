@@ -139,5 +139,6 @@ void whm_mxl_rad_requestSync(T_Radio* pRad);
 swl_rc_ne whm_mxl_rad_getTxPowerdBm(T_Radio* rad, int32_t* dbm);
 swl_rc_ne whm_mxl_rad_getMaxTxPowerdBm(T_Radio* pRad, uint16_t channel, int32_t* dbm);
 bool whm_mxl_rad_checkForceEnableBe(T_Radio* pRad);
+void whm_mxl_rad_removeSuppDrvCap(T_Radio* pRad, swl_freqBand_e suppBand, const char* suppCap);
 
 #endif /* __WHM_MXL_RAD_H__ */

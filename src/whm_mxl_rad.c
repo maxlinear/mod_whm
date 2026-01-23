@@ -79,27 +79,105 @@ static void s_mxl_rad_init_vendordata(T_Radio* pRad) {
     whm_mxl_rad_delVap_timer_init(pRad);
 }
 
+// TODO: Should be removed once this API is upstreamed
+void whm_mxl_rad_removeSuppDrvCap(T_Radio* pRad, swl_freqBand_e suppBand, const char* suppCap) {
+    ASSERTS_EQUALS(wld_rad_findSuppDrvCap(pRad, suppBand, (char *)suppCap), SWL_TRL_TRUE, , ME, "ignored");
+
+    char* currentCaps = pRad->suppDrvCaps[suppBand];
+    size_t len = strlen(currentCaps) + 1U;
+    char suppCaps[len];
+    ASSERTS_TRUE(swl_str_copy(suppCaps, len, currentCaps), , ME, "copy fail");
+
+    char updatedCaps[len];
+    updatedCaps[0] = '\0';
+
+    char* saveptr = NULL;
+    char* token = strtok_r(suppCaps, " ", &saveptr);
+    while(token != NULL) {
+        if(!swl_str_matches(token, suppCap)) {
+            ASSERTS_TRUE(swl_strlst_cat(updatedCaps, len, " ", token), , ME, "overflow");
+        }
+        token = strtok_r(NULL, " ", &saveptr);
+    }
+
+    if(updatedCaps[0] == '\0') {
+        free(pRad->suppDrvCaps[suppBand]);
+        pRad->suppDrvCaps[suppBand] = NULL;
+        SAH_TRACEZ_INFO(ME, "%s: Caps[%s] cleared", pRad->Name, swl_freqBand_str[suppBand]);
+    } else {
+        ASSERTS_TRUE(swl_str_copyMalloc(&pRad->suppDrvCaps[suppBand], updatedCaps), , ME, "alloc fail");
+        SAH_TRACEZ_INFO(ME, "%s: Caps[%s]={%s}", pRad->Name, swl_freqBand_str[suppBand], updatedCaps);
+    }
+}
+
+static bool s_isOverridableDrvCap(const char* drvCap) {
+    static const char* const supportedCaps[] = {"MLO"};
+    for (size_t idx = 0; idx < (sizeof(supportedCaps) / sizeof(supportedCaps[0])); idx++) {
+        if (swl_str_matches(drvCap, supportedCaps[idx])) {
+            return true;
+        }
+    }
+    return false;
+}
+
+amxd_status_t _whm_mxl_rad_addOrRemoveCapability(amxd_object_t* object,
+                                                 amxd_function_t* func _UNUSED,
+                                                 amxc_var_t* args,
+                                                 amxc_var_t* retval _UNUSED) {
+
+    amxd_object_t* radObj  = amxd_object_get_parent(object);
+    T_Radio* pRad          = wld_rad_fromObj(radObj);
+    ASSERT_NOT_NULL(pRad, amxd_status_object_not_found, ME, "NULL");
+
+    const char* drvCap     = GET_CHAR(args, "drvCap");
+    ASSERT_NOT_NULL(drvCap, amxd_status_invalid_value, ME, "drvCap NULL");
+    ASSERTI_TRUE(!swl_str_isEmpty(drvCap), amxd_status_invalid_value, ME, "drvCap empty");
+    ASSERTI_TRUE(s_isOverridableDrvCap(drvCap), amxd_status_invalid_value, ME,
+                 "%s: Unsupported capability %s", pRad->Name, drvCap);
+
+    bool toAdd             = GET_BOOL(args, "toAdd");
+    swl_freqBand_e radBand = wld_rad_getFreqBand(pRad);
+    swl_trl_e capPresent   = wld_rad_findSuppDrvCap(pRad, radBand, (char *)drvCap);
+
+    if (toAdd) {
+        if (capPresent == SWL_TRL_TRUE) {
+            SAH_TRACEZ_INFO(ME, "%s: Capability %s already present", pRad->Name, drvCap);
+            return amxd_status_ok;
+        }
+        wld_rad_addSuppDrvCap(pRad, radBand, (char *)drvCap);
+    } else {
+        if (capPresent == SWL_TRL_FALSE) {
+            SAH_TRACEZ_INFO(ME, "%s: Capability %s not present", pRad->Name, drvCap);
+            return amxd_status_ok;
+        }
+        whm_mxl_rad_removeSuppDrvCap(pRad, radBand, drvCap);
+    }
+
+    SAH_TRACEZ_INFO(ME, "%s: %s capability %s", pRad->Name,
+                    toAdd ? "added" : "removed", drvCap);
+    pRad->pFA->mfn_sync_radio(pRad->pBus, pRad, SET);
+    whm_mxl_toggleHapd(pRad);
+
+    return amxd_status_ok;
+}
+
 int whm_mxl_rad_supports(T_Radio* pRad, char* buf _UNUSED, int bufsize _UNUSED) {
     ASSERT_NOT_NULL(pRad, SWL_RC_INVALID_PARAM, ME, "NULL");
     swl_rc_ne rc;
 
     CALL_NL80211_FTA_RET(rc, mfn_wrad_supports, pRad, buf, bufsize);
     ASSERT_FALSE(rc < SWL_RC_OK, rc, ME, "fail in generic call");
+
     /*
     The generic mfn_wrad_supports will reset the capabilities during radio init,
     Any additional capabilities from vendor plugin should be added after the generic call
     */
 
-    /* Set OWE as supported for all bands */
-    if (wld_rad_is_24ghz(pRad)) {
-        wld_rad_addSuppDrvCap(pRad, SWL_FREQ_BAND_2_4GHZ, "OWE");
-    } else if (wld_rad_is_5ghz(pRad)) {
-        wld_rad_addSuppDrvCap(pRad, SWL_FREQ_BAND_5GHZ, "OWE");
-    } else if (wld_rad_is_6ghz(pRad)) {
-        wld_rad_addSuppDrvCap(pRad, SWL_FREQ_BAND_6GHZ, "OWE");
-    }
+    // TODO: I dont think we still need this. It should be hanlded by pWHM.
+    swl_freqBand_e radBand = wld_rad_getFreqBand(pRad);
+    wld_rad_addSuppDrvCap(pRad, radBand, "OWE");
 
-    /*  
+    /*
      *  Mark support for MBSSID - Driver does not populate NL80211_MBSSID_CONFIG_ATTR_MAX_INTERFACES
      *  so we will directly mark that we support MBSSID so that the generic MBSSID handling can be used
      *  i.e. deleting conf section of disabled VAPs when MBSSID is enabled on that radio

@@ -1045,6 +1045,25 @@ static void s_setSaeExtKey_pwf(void* priv _UNUSED, amxd_object_t* object, amxd_p
     SAH_TRACEZ_OUT(ME);
 }
 
+static void s_setHiddenSSIDType_pwf(void* priv _UNUSED, amxd_object_t* object, amxd_param_t* param _UNUSED, const amxc_var_t* const newParamValues) {
+    SAH_TRACEZ_IN(ME);
+    /* WiFi.AccessPoint.{}.Vendor */
+    amxd_object_t* vapObj = amxd_object_get_parent(object);
+    T_AccessPoint* pAP = wld_ap_fromObj(vapObj);
+    ASSERT_NOT_NULL(pAP, , ME, "No AccessPoint Mapped");
+    T_SSID* pSSID = (T_SSID*)pAP->pSSID;
+    ASSERT_NOT_NULL(pAP, , ME, "No SSID Mapped");
+    mxl_VapVendorData_t* mxlVapVendorData = mxl_vap_getVapVendorData(pAP);
+    ASSERTS_NOT_NULL(mxlVapVendorData, , ME, "mxlVapVendorData is NULL");
+    uint8_t ssidType = amxc_var_dyncast(uint8_t, newParamValues);
+    mxlVapVendorData->hiddenSSIDType = ssidType;
+
+    pAP->pFA->mfn_wvap_ssid(pAP, (char*) pSSID->SSID, strlen(pSSID->SSID), SET);
+    wld_autoCommitMgr_notifyVapEdit(pAP);
+
+    SAH_TRACEZ_OUT(ME);
+}
+
 static void s_setEnableWPA3PersonalCompatibility_pwf(void* priv _UNUSED, amxd_object_t* object, amxd_param_t* param _UNUSED, const amxc_var_t* const newParamValues) {
     SAH_TRACEZ_IN(ME);
     /* WiFi.AccessPoint.{}.Vendor */
@@ -1153,7 +1172,6 @@ static void s_setH2eRequired_pwf(void* priv _UNUSED, amxd_object_t* object, amxd
     if(whm_mxl_isCertModeEnabled()) {
         bool newVal = amxc_var_dyncast(bool, newParamValues);
         mxlVapVendorData->h2eRequired = newVal;
-        SAH_TRACEZ_WARNING(ME, "It is setting the H2E val %d", newVal);
         whm_mxl_toggleHapd(pAP->pRadio);
     }
 
@@ -1319,7 +1337,8 @@ SWLA_DM_HDLRS(sVapVendorDmHdlrs,
                   SWLA_DM_PARAM_HDLR("H2eRequired", s_setH2eRequired_pwf),
                   SWLA_DM_PARAM_HDLR("SCSEnable", s_setBoolVendorParam_pwf),
                   SWLA_DM_PARAM_HDLR("MSCSEnable", s_setBoolVendorParam_pwf),
-                  SWLA_DM_PARAM_HDLR("QoSMap", s_setQoSMap_pwf))
+                  SWLA_DM_PARAM_HDLR("QoSMap", s_setQoSMap_pwf),
+                  SWLA_DM_PARAM_HDLR("HiddenSSIDType", s_setHiddenSSIDType_pwf))
               );
 
 void _whm_mxl_vap_setVapVendorObj_ocf(const char* const sig_name,

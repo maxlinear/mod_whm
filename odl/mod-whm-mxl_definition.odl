@@ -123,6 +123,24 @@
                 %persistent bool BackgroundCac = true {
                     on action validate call whm_mxl_rad_validateBackgroundCac_pvf;
                 }
+
+                /**
+                 * @brief Add/remove a vendor-specific radio capability at runtime.
+                 *
+                 * Implements ODL vendor command to dynamic add/remove supported driver capabilities
+                 * (e.g., "MLO") * for a radio.
+                 * All capabilities can be found in WiFi.Radio.{i}.IEEE80211_Caps
+                 *
+                 * Currently supported Overridable Capabilities:
+                 *   - MLO
+                 *
+                 * @param drvCap (string, mandatory) : Capability name to add/remove.
+                 * @param toAdd (bool, mandatory)    : true to add, false to remove.
+                 * @return amxd_status_ok on success, or error code on failure.
+                 */
+                void addOrRemoveCapability(%in %mandatory string drvCap, %in %mandatory bool toAdd)
+                    <!import:${module}:_whm_mxl_rad_addOrRemoveCapability!>;
+
                 /* Certification configuration paramneter starts here */
                 %persistent bool TestBedMode {
                     default false;
@@ -1152,6 +1170,16 @@
                     default 0;
                 }
                 %persistent bool MSCSEnable {
+                    default 0;
+                }
+                /*
+                * HiddenSSIDType will set the ignore_broadcast_ssid in hostapd conf
+                * 0 - Use generic value when hidden ssid configured
+                * 1 - When hidden ssid configured overwrite to 1 (zero len SSID IE)
+                * 2 - When hidden ssid configured overwrite to 2 (null ASCII SSID)
+                */
+                %persistent uint8 HiddenSSIDType {
+                    on action validate call check_range { min = 0, max = 2 };
                     default 0;
                 }
                 /*
