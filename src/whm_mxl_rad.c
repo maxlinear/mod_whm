@@ -1461,6 +1461,9 @@ static void s_setAcsConfig_ocf(void* priv _UNUSED, amxd_object_t* object, const 
                 pRadVendor->bgAcsInterval = amxc_var_dyncast(uint16_t, newValue);
                 whm_mxl_configureBgAcs(pRad, pRadVendor->bgAcsInterval);
             }
+        } else if(swl_str_matches(pname, "AcsChanList")) {
+            newValStr = amxc_var_dyncast(cstring_t, newValue);
+            whm_mxl_determineRadParamAction(pRad, pname, newValStr);
         } else if(swl_str_matches(pname, "AcsFallbackPrimaryChan")) {
             ASSERT_NOT_NULL(pRadVendor, , ME, "pRadVendor is NULL");
             pRadVendor->AcsFbPrimChan = amxc_var_dyncast(int32_t, newValue);

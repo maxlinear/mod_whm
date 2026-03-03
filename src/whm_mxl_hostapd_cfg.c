@@ -63,6 +63,8 @@ static swl_rc_ne whm_mxl_rad_acsUpdateConfigMap(T_Radio* pRad, mxl_VendorData_t*
     ASSERT_NOT_NULL(acsObj, SWL_RC_ERROR, ME, "No ACS vendor obj");
     char *acsFallbackChan = amxd_object_get_value(cstring_t, acsObj, "AcsFallbackChan", NULL);
     char *acs6gOptChList = amxd_object_get_value(cstring_t, acsObj, "Acs6gOptChList", NULL);
+    char *acsStrictChList = amxd_object_get_value(cstring_t, acsObj, "AcsStrictChList", NULL);
+    char *acsChanList = amxd_object_get_value(cstring_t, acsObj, "AcsChanList", NULL);
 
     swl_mapCharFmt_addValStr(configMap, "acs_smart_info_file", "%s%s%s", "/tmp/acs_smart_info_", pRad->Name, ".txt");
     swl_mapCharFmt_addValStr(configMap, "acs_history_file", "%s%s%s", "/tmp/acs_history_", pRad->Name, ".txt");
@@ -77,6 +79,16 @@ static swl_rc_ne whm_mxl_rad_acsUpdateConfigMap(T_Radio* pRad, mxl_VendorData_t*
         swl_mapCharFmt_addValStr(configMap, "acs_6g_opt_ch_list", "%s", acs6gOptChList);
     }
     free(acs6gOptChList);
+
+    if (!swl_str_isEmpty(acsStrictChList)) {
+        swl_mapCharFmt_addValStr(configMap, "acs_strict_chanlist", "%s", acsStrictChList);
+    }
+    free(acsStrictChList);
+
+    if (!swl_str_isEmpty(acsChanList)) {
+        swl_mapCharFmt_addValStr(configMap, "chanlist", "%s", acsChanList);
+    }
+    free(acsChanList);
 
     if (wld_rad_checkEnabledRadStd(pRad, SWL_RADSTD_AX) && wld_rad_is_6ghz(pRad)) {
         swl_mapCharFmt_addValInt32(configMap, "acs_fils", amxd_object_get_value(bool, acsObj, "AcsFils", NULL));

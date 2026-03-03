@@ -758,6 +758,13 @@
                     %persistent bool Acs6gPunctMode {
                         default false;
                     }
+                    /*
+                    * Channel list restriction. This option allows hostapd to select one of the
+                    * provided channels when a channel should be automatically selected(ACS enabled)
+                    */
+                    %persistent string AcsChanList {
+                        default "";
+                    }
                 }
                 /*
                 * AFC custom config parameters
