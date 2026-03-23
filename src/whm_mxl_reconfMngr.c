@@ -41,6 +41,7 @@
 
 #define MAX_COMMITS_PENDING             30
 #define MAX_WAIT_FROM_FIRST_COMMIT_SEC  30
+#define REFRESH_PERIOD_MS               750
 
 typedef struct {
     bool enable;
@@ -429,7 +430,7 @@ static void s_apChangeEventCb(wld_vap_changeEvent_t* event) {
     ASSERT_NOT_NULL(pAP, , ME, "NULL");
     T_Radio* pRad = pAP->pRadio;
     ASSERT_NOT_NULL(pRad, , ME, "NULL");
-    SAH_TRACEZ_INFO(ME, "%s: reconf mngr receiving event %d", pAP->alias, event->changeType);
+    SAH_TRACEZ_INFO(ME, "%s: reconf mngr receiving vap change event %d", pAP->alias, event->changeType);
     if (event->changeType == WLD_VAP_CHANGE_EVENT_CREATE_FINAL) {
         /* New vap was added dynamically */
         if (wld_secDmn_isRunning(pRad->hostapd) && wld_rad_firstCommitFinished(pRad)) {
@@ -442,8 +443,26 @@ static wld_event_callback_t s_apChangeCbEvt = {
     .callback = (wld_event_callback_fun) s_apChangeEventCb,
 };
 
+static void s_stationChangeEventCb(wld_ad_changeEvent_t* event) {
+    ASSERT_NOT_NULL(event, , ME, "NULL");
+    T_AccessPoint* pAP = event->vap;
+    ASSERT_NOT_NULL(pAP, , ME, "NULL");
+    T_Radio* pRad = pAP->pRadio;
+    ASSERT_NOT_NULL(pRad, , ME, "NULL");
+    T_AssociatedDevice* pAD = event->ad;
+    SAH_TRACEZ_INFO(ME, "%s: reconf mngr receiving ad change event %d", pAP->alias, event->changeType);
+    if (event->changeType == WLD_AD_CHANGE_EVENT_CREATE) {
+        pAD->onActionReadCtx.minRefreshPeriodMs = REFRESH_PERIOD_MS;
+    }
+}
+
+static wld_event_callback_t s_stationChangeCbEvt = {
+    .callback = (wld_event_callback_fun) s_stationChangeEventCb,
+};
+
 void whm_mxl_reconfMngr_initEvents(void) {
     wld_event_add_callback(gWld_queue_vap_onChangeEvent, &s_apChangeCbEvt);
+    wld_event_add_callback(gWld_queue_sta_onChangeEvent, &s_stationChangeCbEvt);
 }
 
 static void s_startReconfCommit(T_Radio* pRad) {

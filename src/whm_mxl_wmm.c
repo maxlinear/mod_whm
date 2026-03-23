@@ -128,7 +128,7 @@ swl_rc_ne mxl_getWmmStats(T_AccessPoint* pAP, T_Stats *stats, bool add)
             if (!strstr(line, wmm_marker[i]))
                 continue;
 
-            num_entries = sscanf(line, "|%*[^|]|%*[^|]|%d |%d", &tx_packets, &tx_packets_fail);
+            num_entries = sscanf(line, "|%*[^|]|%*[^|]|%u |%u", &tx_packets, &tx_packets_fail);
             if (num_entries != 2) {
                 SAH_TRACEZ_ERROR(ME, "%s: Cannot extract %d statistics", pAP->alias, i);
                 goto end;

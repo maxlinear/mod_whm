@@ -17,6 +17,7 @@
 typedef void (* evtParser_f)(void* userData, char* ifName, char* event, char* params);
 typedef swl_rc_ne (* custEvtParser_f)(void* userData, char* ifName, char* event, char* params);
 
-swl_rc_ne mxl_evt_setVendorEvtHandlers(T_Radio* pRad);
+swl_rc_ne whm_mxl_evt_setVendorEvtHandlers(T_Radio* pRad);
+swl_rc_ne whm_mxl_evt_setVapEvtHandlers(T_AccessPoint* pAP);
 
 #endif /* __WHM_MXL_EVT_H__ */

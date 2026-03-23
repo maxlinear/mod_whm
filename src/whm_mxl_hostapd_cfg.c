@@ -61,30 +61,33 @@ SWL_TABLE(sChWidthIDsMaps,
 static swl_rc_ne whm_mxl_rad_acsUpdateConfigMap(T_Radio* pRad, mxl_VendorData_t* pRadVendor, swl_mapChar_t* configMap) {
     amxd_object_t* acsObj = amxd_object_get(pRadVendor->pBus, "ACS");
     ASSERT_NOT_NULL(acsObj, SWL_RC_ERROR, ME, "No ACS vendor obj");
-    char *acsFallbackChan = amxd_object_get_value(cstring_t, acsObj, "AcsFallbackChan", NULL);
-    char *acs6gOptChList = amxd_object_get_value(cstring_t, acsObj, "Acs6gOptChList", NULL);
-    char *acsStrictChList = amxd_object_get_value(cstring_t, acsObj, "AcsStrictChList", NULL);
-    char *acsChanList = amxd_object_get_value(cstring_t, acsObj, "AcsChanList", NULL);
+    char *acsFallbackChan, *acs6gOptChList, *acsStrictChList, *acsChanList;
 
     swl_mapCharFmt_addValStr(configMap, "acs_smart_info_file", "%s%s%s", "/tmp/acs_smart_info_", pRad->Name, ".txt");
     swl_mapCharFmt_addValStr(configMap, "acs_history_file", "%s%s%s", "/tmp/acs_history_", pRad->Name, ".txt");
     swl_mapCharFmt_addValInt32(configMap, "acs_num_scans", 1);
     swl_mapCharFmt_addValInt32(configMap, "acs_scan_mode", amxd_object_get_value(bool, acsObj, "AcsScanMode", NULL));
     swl_mapCharFmt_addValInt32(configMap, "acs_update_do_switch", amxd_object_get_value(bool, acsObj, "AcsUpdateDoSwitch", NULL));
+
+    acsFallbackChan = amxd_object_get_value(cstring_t, acsObj, "AcsFallbackChan", NULL);
     if (!swl_str_isEmpty(acsFallbackChan)) {
         swl_mapCharFmt_addValStr(configMap, "acs_fallback_chan", "%s", acsFallbackChan);
     }
     free(acsFallbackChan);
+
+    acs6gOptChList = amxd_object_get_value(cstring_t, acsObj, "Acs6gOptChList", NULL);
     if (!swl_str_isEmpty(acs6gOptChList)) {
         swl_mapCharFmt_addValStr(configMap, "acs_6g_opt_ch_list", "%s", acs6gOptChList);
     }
     free(acs6gOptChList);
 
+    acsStrictChList = amxd_object_get_value(cstring_t, acsObj, "AcsStrictChList", NULL);
     if (!swl_str_isEmpty(acsStrictChList)) {
         swl_mapCharFmt_addValStr(configMap, "acs_strict_chanlist", "%s", acsStrictChList);
     }
     free(acsStrictChList);
 
+    acsChanList = amxd_object_get_value(cstring_t, acsObj, "AcsChanList", NULL);
     if (!swl_str_isEmpty(acsChanList)) {
         swl_mapCharFmt_addValStr(configMap, "chanlist", "%s", acsChanList);
     }
@@ -425,7 +428,10 @@ static void s_rad_configEhtCapabs(T_Radio* pRad, swl_mapChar_t* configMap) {
 
     if(pEhtChWId) {
         if(pChWId && (*pChWId != *pEhtChWId)) {
-            tgtChspec.bandwidth = *(uint32_t*) swl_table_getMatchingValue(&sChWidthIDsMaps, 2, 1, pEhtChWId);
+            uint32_t* pBandwidth = (uint32_t*) swl_table_getMatchingValue(&sChWidthIDsMaps, 2, 1, pEhtChWId);
+            if (pBandwidth) {
+                tgtChspec.bandwidth = *pBandwidth;
+            }
         }
         swl_channel_t centerChan = swl_chanspec_getCentreChannel(&tgtChspec);
         swl_mapCharFmt_addValInt32(configMap, "eht_oper_chwidth", *pEhtChWId);
@@ -974,24 +980,27 @@ static void whm_mxl_vap_multiApConfig(T_AccessPoint* pAP, amxd_object_t* pVendor
 }
 
 static void whm_mxl_vap_mloConfig(T_AccessPoint* pAP, swl_mapChar_t* configMap) {
-    // Remove mld_ap as MxL MLO does not user this hostap paramter for MLO
+    // Remove mld_ap as MxL MLO does not use this hostap paramter for MLO
     if (swl_mapChar_has(configMap, "mld_ap"))
         swl_mapChar_delete(configMap, "mld_ap");
 
     if (whm_mxl_mlo_checkMloEnable(pAP)) {
-        amxd_object_t* pMLO = whm_mxl_mlo_getMloObject(pAP);
-        ASSERT_NOT_NULL(pMLO, , ME, "pMLO is NULL");
         mxl_VapVendorData_t* vapVendor = mxl_vap_getVapVendorData(pAP);
         ASSERTS_NOT_NULL(vapVendor, , ME, "vapVendor is NULL");
+        whm_mxl_mld_t* pMld = vapVendor->pMld;
+        ASSERT_NOT_NULL(pMld, , ME, "pMld is NULL");
+        swl_macChar_t mldMacChar = SWL_MAC_CHAR_NEW();
+        swl_mac_binToChar(&mldMacChar, &pMld->apMldMac);
 
         SAH_TRACEZ_INFO(ME, "%s: MLO enabled", pAP->alias);
         swl_mapCharFmt_addValInt32(configMap, "mlo_enable", 1);
-        swl_mapCharFmt_addValStr(configMap, "ap_mld_mac", "%s",
-                                 vapVendor->mldLink.apMldMac.cMac);
+        swl_mapCharFmt_addValStr(configMap, "ap_mld_mac", "%s", mldMacChar.cMac);
+        swl_mapCharFmt_addValInt32(configMap, "links_per_ap_mld", pMld->mldType);
+
         swl_mapCharFmt_addValStr(configMap, "wds_single_ml_assoc", "%d",
-                                 vapVendor->mldLink.wdsSingleMlAssoc);
+                                 vapVendor->wdsSingleMlAssoc);
         swl_mapCharFmt_addValStr(configMap, "wds_primary_link", "%d",
-                                 vapVendor->mldLink.wdsPrimaryLink);
+                                 vapVendor->wdsPrimaryLink);
     } else {
         swl_mapCharFmt_addValInt32(configMap, "mlo_enable", 0);
     }
@@ -1192,19 +1201,20 @@ static void whm_mxl_vap_configCertification(T_AccessPoint* pAP, amxd_object_t* p
     ASSERT_NOT_NULL(pVendorObj, , ME, "pVendorObj is NULL");
     mxl_VapVendorData_t* mxlVapVendorData = mxl_vap_getVapVendorData(pAP);
     ASSERTS_NOT_NULL(mxlVapVendorData, , ME, "mxlVapVendorData is NULL");
-    char *setAggrConfig = amxd_object_get_value(cstring_t, pVendorObj, "SetAggrConfig", NULL);
-    char *groupMgmtCipher = amxd_object_get_value(cstring_t, pVendorObj, "GroupMgmtCipher", NULL);
-    char *groupCipher = amxd_object_get_value(cstring_t, pVendorObj, "GroupCipher", NULL);
-    char *qosMap = amxd_object_get_value(cstring_t, pVendorObj, "QoSMap", NULL);
+    char *setAggrConfig, *groupMgmtCipher, *groupCipher, *qosMap;
 
+    setAggrConfig = amxd_object_get_value(cstring_t, pVendorObj, "SetAggrConfig", NULL);
     if(!swl_str_isEmpty(setAggrConfig)) {
         swl_mapCharFmt_addValStr(configMap, "sAggrConfig", "%s", setAggrConfig);
     }
     free(setAggrConfig);
+
+    qosMap = amxd_object_get_value(cstring_t, pVendorObj, "QoSMap", NULL);
     if(!swl_str_isEmpty(qosMap)) {
         swl_mapCharFmt_addValStr(configMap, "qos_map_set", "%s", qosMap);
     }
     free(qosMap);
+
     swl_mapCharFmt_addValInt32(configMap, "s11nProtection", amxd_object_get_value(uint32_t, pVendorObj, "Set11nProtection", NULL));
     swl_mapCharFmt_addValInt32(configMap, "mld_mediumsync_present", amxd_object_get_value(bool, pVendorObj, "MldMediumsyncPresent", NULL));
     swl_mapCharFmt_addValInt32(configMap, "mlo_t2lm_support", amxd_object_get_value(bool, pVendorObj, "MloT2lmSupport", NULL));
@@ -1215,10 +1225,19 @@ static void whm_mxl_vap_configCertification(T_AccessPoint* pAP, amxd_object_t* p
     swl_mapCharFmt_addValInt32(configMap, "mld_mediumsync_duration", amxd_object_get_value(uint8_t, pVendorObj, "MldMediumsyncDuration", NULL));
     swl_mapCharFmt_addValInt32(configMap, "mld_mediumsync_ofdmedthresh", amxd_object_get_value(uint8_t, pVendorObj, "MldMediumsyncOfdmedthresh", NULL));
     swl_mapCharFmt_addValInt32(configMap, "mld_mediumsync_maxtxop", amxd_object_get_value(uint8_t, pVendorObj, "MldMediumsyncMaxtxop", NULL));
-    swl_mapCharFmt_addValStr(configMap, "group_mgmt_cipher", "%s", groupMgmtCipher);
+
+    groupMgmtCipher = amxd_object_get_value(cstring_t, pVendorObj, "GroupMgmtCipher", NULL);
+    if(!swl_str_isEmpty(groupMgmtCipher)) {
+        swl_mapCharFmt_addValStr(configMap, "group_mgmt_cipher", "%s", groupMgmtCipher);
+    }
     free(groupMgmtCipher);
-    swl_mapCharFmt_addValStr(configMap, "group_cipher", "%s", groupCipher);
+
+    groupCipher = amxd_object_get_value(cstring_t, pVendorObj, "GroupCipher", NULL);
+    if(!swl_str_isEmpty(groupCipher)) {
+        swl_mapCharFmt_addValStr(configMap, "group_cipher", "%s", groupCipher);
+    }
     free(groupCipher);
+
     swl_mapCharFmt_addValInt32(configMap, "wmm_ac_vi_cwmin", amxd_object_get_value(int32_t, pVendorObj, "WmmAcVICWMin", NULL));
     swl_mapCharFmt_addValInt32(configMap, "wmm_ac_vi_cwmax", amxd_object_get_value(int32_t, pVendorObj, "WmmAcVICWMax", NULL));
     swl_mapCharFmt_addValInt32(configMap, "wmm_ac_vi_aifs", amxd_object_get_value(int32_t, pVendorObj, "WmmAcVIAifs", NULL));
@@ -1264,6 +1283,8 @@ static void s_whm_mxl_vap_steeringConfig(T_AccessPoint* pAP, swl_mapChar_t* conf
 static swl_rc_ne s_mxl_vap_updateConfig(T_AccessPoint* pAP, swl_mapChar_t* configMap) {
     SAH_TRACEZ_IN(ME);
     ASSERT_NOT_NULL(pAP, SWL_RC_INVALID_PARAM, ME, "NULL");
+    mxl_VapVendorData_t* mxlVapVendorData = mxl_vap_getVapVendorData(pAP);
+    ASSERT_NOT_NULL(mxlVapVendorData, SWL_RC_INVALID_PARAM, ME, "mxlVapVendorData is NULL");
 
     /* Take pointer to the Vendor Object */
     amxd_object_t* pVendorObj = amxd_object_get(pAP->pBus, "Vendor");
@@ -1330,7 +1351,7 @@ static swl_rc_ne s_mxl_vap_updateConfig(T_AccessPoint* pAP, swl_mapChar_t* confi
         /* Force-enable BE stuff if override is enabled */
         swl_mapChar_delete(configMap, "disable_11be");
         whm_mxl_vap_mloConfig(pAP, configMap);
-        swl_mapCharFmt_addValInt32(configMap, "disable_beacon_prot", amxd_object_get_value(bool, pVendorObj, "DisableBeaconProtection", NULL));
+        WHM_MXL_NE_SET_PARAM(mxlVapVendorData->disableBeaconProt, 0, configMap, "disable_beacon_prot");
     }
 
     /* Steering parameters */

@@ -1131,6 +1131,38 @@ swl_rc_ne whm_mxl_handleMbssidOverride(T_Radio* pRad, bool overideMbssid) {
     return SWL_RC_OK;
 }
 
+swl_rc_ne whm_mxl_updateDisableBeaconProt(T_AccessPoint* pAP) {
+    ASSERT_NOT_NULL(pAP, SWL_RC_INVALID_PARAM, ME, "pAP is NULL");
+    mxl_VapVendorData_t* mxlVapVendorData = mxl_vap_getVapVendorData(pAP);
+    ASSERT_NOT_NULL(mxlVapVendorData, SWL_RC_INVALID_PARAM, ME, "mxlVapVendorData is NULL");
+    T_Radio* pRad = (T_Radio*) pAP->pRadio;
+    bool disableBeaconProt = mxlVapVendorData->disableBeaconProt;
+    T_AccessPoint* otherAp;
+
+    /* Update same value of disableBeaconProt for all 6GHz VAPs due to MBSSID */
+    if (wld_rad_is_6ghz(pRad)) {
+        wld_rad_forEachAp(otherAp, pRad) {
+            amxd_object_t* pVendorObj = NULL;
+            mxl_VapVendorData_t* pVendorAp = mxl_vap_getVapVendorData(otherAp);
+            if ((otherAp == pAP) || whm_mxl_utils_isDummyVap(otherAp) || !pVendorAp) {
+                continue;
+            }
+            pVendorAp->disableBeaconProt = disableBeaconProt;
+            if (wld_wpaCtrlInterface_isReady(otherAp->wpaCtrlInterface)) {
+                wld_ap_hostapd_setParamValue(otherAp, "disable_beacon_prot",
+                    (disableBeaconProt ? "1" : "0"), "disable beacon protection");
+            }
+            pVendorObj = amxd_object_findf(otherAp->pBus, "Vendor");
+            if (pVendorObj) {
+                amxd_object_set_value(bool, pVendorObj, "DisableBeaconProtection", disableBeaconProt);
+            }
+            SAH_TRACEZ_INFO(ME, "%s: Update disable beacon protection to %d", otherAp->alias, disableBeaconProt);
+        }
+    }
+
+    return SWL_RC_OK;
+}
+
 swl_rc_ne whm_mxl_configureSaeExt(T_AccessPoint* pAP) {
     ASSERT_NOT_NULL(pAP, SWL_RC_INVALID_PARAM, ME, "No pAP Mapped");
     T_Radio* pRad = pAP->pRadio;

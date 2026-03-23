@@ -230,6 +230,7 @@ bool whm_mxl_module_init(void) {
     fta.mfn_wvap_clean_sta = whm_mxl_vap_clean_sta;
     fta.mfn_wvap_updated_neighbour = whm_mxl_vap_updated_neighbor;
     fta.mfn_wvap_transfer_sta = whm_mxl_vap_transfer_sta;
+    fta.mfn_wvap_setEvtHandlers = whm_mxl_setVapEvtHandlers;
     fta.mfn_wvap_setMldUnit = whm_mxl_mlo_setMldUnit;
 
     fta.mfn_wendpoint_enable = whm_mxl_ep_enable;
@@ -255,6 +256,8 @@ bool whm_mxl_module_init(void) {
     whm_mxl_extLocker_init((wld_fsmMngr_t*) wld_nl80211_getFsmMngr());
     /* Register to event queues */
     whm_mxl_reconfMngr_initEvents();
+    /* Init MLD */
+    whm_mxl_mlo_initMld();
 
     /* init done */
     s_init = true;
@@ -271,6 +274,7 @@ bool whm_mxl_module_deInit(void) {
     ASSERT_FALSE(wld_isVendorUsed(s_vendor), false, ME, "Still used");
     ASSERT_TRUE(wld_unregisterVendor(s_vendor), false, ME, "unregister failure");
     mxl_rad_deleteZwDfsRadio();
+    whm_mxl_mlo_deinitMld();
     s_init = false;
     s_vendor = NULL;
     return true;

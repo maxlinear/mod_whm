@@ -60,6 +60,7 @@ swl_rc_ne whm_mxl_restartAllRadios();
 swl_rc_ne whm_mxl_set_vendorMultipleParams(T_AccessPoint* pAP, const char* params[], uint32_t nParams);
 swl_rc_ne whm_mxl_updateMultiAp(T_AccessPoint* pAP);
 swl_rc_ne whm_mxl_handleMbssidOverride(T_Radio* pRad, bool overideMbssid);
+swl_rc_ne whm_mxl_updateDisableBeaconProt(T_AccessPoint* pAP);
 swl_rc_ne whm_mxl_updateOnEventMaxAssociatedDevices(T_AccessPoint* pAP);
 swl_rc_ne whm_mxl_configureSaeExt(T_AccessPoint* pAP);
 swl_rc_ne whm_mxl_toggleWPA3PersonalCompatibility(T_AccessPoint* pAP);

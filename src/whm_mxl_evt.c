@@ -18,6 +18,7 @@
 #include "swla/swla_chanspec.h"
 
 #include "wld/wld_radio.h"
+#include "wld/wld_ssid.h"
 #include "wld/wld_nl80211_compat.h"
 #include "wld/wld_nl80211_api.h"
 #include "wld/wld_nl80211_attr.h"
@@ -394,7 +395,7 @@ static swl_rc_ne s_mxl_setRadioWpaCtrlEvtHandlers(T_Radio* pRad) {
     return SWL_RC_OK;
 }
 
-swl_rc_ne mxl_evt_setVendorEvtHandlers(T_Radio* pRad) {
+swl_rc_ne whm_mxl_evt_setVendorEvtHandlers(T_Radio* pRad) {
     ASSERT_NOT_NULL(pRad, SWL_RC_INVALID_PARAM, ME, "pRad NULL");
 
     /*
@@ -406,5 +407,40 @@ swl_rc_ne mxl_evt_setVendorEvtHandlers(T_Radio* pRad) {
     }
 
     s_mxl_setRadioWpaCtrlEvtHandlers(pRad);
+    return SWL_RC_OK;
+}
+
+static void s_selectLinkIface(void* userData, const char* ifName, char** pPrimLinkIfName) {
+    ASSERT_NOT_NULL(pPrimLinkIfName, , ME, "NULL");
+    swl_str_copyMalloc(pPrimLinkIfName, NULL);
+    ASSERT_STR(ifName, , ME, "empty ifname");
+    T_AccessPoint* pAP = (T_AccessPoint*) userData;
+    ASSERT_EQUALS(wld_vap_from_name(ifName), pAP, , ME, "vap (%p) ifname (%s) mismatch", pAP, ifName);
+    /* Primary link is always the VAP itself - our MLO has no primary link concept */
+    const char* pLinkIfName = wld_ssid_getIfName(pAP->pSSID);
+    ASSERTI_STR(pLinkIfName, , ME, "no prim link iface for iface (%s)", ifName);
+    SAH_TRACEZ_INFO(ME, "Primary link iface (%s) for link (%s)", pLinkIfName, ifName);
+    swl_str_copyMalloc(pPrimLinkIfName, pLinkIfName);
+}
+
+swl_rc_ne whm_mxl_evt_setVapEvtHandlers(T_AccessPoint* pAP) {
+    ASSERT_NOT_NULL(pAP, SWL_RC_INVALID_PARAM, ME, "pAP is NULL");
+    ASSERT_NOT_NULL(pAP->wpaCtrlInterface, SWL_RC_INVALID_PARAM, ME, "wpaCtrlIface is NULL");
+    wld_wpaCtrl_evtHandlers_cb wpaCtrlVapEvtHandlers;
+    memset(&wpaCtrlVapEvtHandlers, 0, sizeof(wpaCtrlVapEvtHandlers));
+
+    if (!wld_wpaCtrlInterface_getEvtHandlers(pAP->wpaCtrlInterface, NULL, &wpaCtrlVapEvtHandlers)) {
+        SAH_TRACEZ_ERROR(ME, "%s: Failed to get VAP event handlers", pAP->alias);
+        return SWL_RC_ERROR;
+    }
+
+    /* Overwrite the default handlers with custom ones */
+    wpaCtrlVapEvtHandlers.fSelectPrimLinkIface = s_selectLinkIface;
+
+    if (!wld_wpaCtrlInterface_setEvtHandlers(pAP->wpaCtrlInterface, pAP, &wpaCtrlVapEvtHandlers)) {
+        SAH_TRACEZ_ERROR(ME, "%s: Failed to set VAP event handlers", pAP->alias);
+        return SWL_RC_ERROR;
+    }
+
     return SWL_RC_OK;
 }

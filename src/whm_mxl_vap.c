@@ -35,10 +35,12 @@
 #include "whm_mxl_cfgActions.h"
 #include "whm_mxl_hostapd_cfg.h"
 #include "whm_mxl_wmm.h"
+#include "whm_mxl_evt.h"
 #include "whm_mxl_mlo.h"
 #include "whm_mxl_reconfMngr.h"
 
 #define START_ENABLE_SYNC_TIMEOUT_MS 10000
+#define MAX_SSID_LEN 36
 
 #define ME "mxlVap"
 
@@ -83,16 +85,29 @@ static void s_mxl_vap_init_vendordata(T_AccessPoint* pAP) {
     /* Add desired initializations here*/
     mxlVapVendorData->saeExtKey = 0;
     mxlVapVendorData->EnableWPA3PersonalCompatibility = 0;
+    mxlVapVendorData->disableBeaconProt = false;
 
-    // MLD Link data defaults
-    mxlVapVendorData->mldLink.mloId = NO_LINK_ID;
-    swl_mac_charClear(&mxlVapVendorData->mldLink.apMldMac);
-    mxlVapVendorData->mldLink.wdsSingleMlAssoc = false;
-    mxlVapVendorData->mldLink.wdsPrimaryLink = false;
+    // Init Default MLD Info
+    mxlVapVendorData->pMld = NULL;
+    mxlVapVendorData->pLink = NULL;
+    mxlVapVendorData->wdsSingleMlAssoc = false;
+    mxlVapVendorData->wdsPrimaryLink = false;
 
     /* Init VAP enable sync timer */
     amxp_timer_new(&mxlVapVendorData->onVapEnableSyncTimer, s_enableSync, pAP);
     return;
+}
+
+swl_rc_ne whm_mxl_setVapEvtHandlers(T_AccessPoint* pAP) {
+    ASSERT_NOT_NULL(pAP, SWL_RC_INVALID_PARAM, ME, "pAP is NULL");
+    swl_rc_ne rc;
+
+    CALL_NL80211_FTA_RET(rc, mfn_wvap_setEvtHandlers, pAP);
+    ASSERT_FALSE(rc < SWL_RC_OK, rc, ME, "fail in generic call");
+
+    whm_mxl_evt_setVapEvtHandlers(pAP);
+
+    return rc;
 }
 
 static void s_mxlWdsIfaceChangeCb(wld_wds_intf_t* wdsIntf) {
@@ -150,6 +165,7 @@ void whm_mxl_vap_destroyHook(T_AccessPoint* pAP){
     CALL_NL80211_FTA(mfn_wvap_destroy_hook, pAP);
     mxlVapVendorData = mxl_vap_getVapVendorData(pAP);
     ASSERT_NOT_NULL(mxlVapVendorData, , ME, "mxlVapVendorData is NULL");
+    whm_mxl_mlo_deleteLink(pAP);
     s_mxl_deinit_vendorVapData(mxlVapVendorData);
     /* Unregister to WDS events is done during Radio destroy hook */
     free(mxlVapVendorData);
@@ -456,13 +472,20 @@ int whm_mxl_vap_ssid(T_AccessPoint* pAP, char* buf, int bufsize, int set) {
     ASSERT_NOT_NULL(pAP, SWL_RC_INVALID_PARAM, ME, "pAP NULL");
     T_SSID* pSSID = (T_SSID*) pAP->pSSID;
     ASSERTI_NOT_NULL(pSSID, SWL_RC_ERROR, ME, "pSSID is NULL");
+    T_Radio* pRad = pAP->pRadio;
+    ASSERTI_NOT_NULL(pRad, SWL_RC_INVALID_PARAM, ME, "pRad is NULL");
     int rc = SWL_RC_OK;
 
     /* Set SSID internally first */
     if(set & SET) {
         swl_str_copy(pSSID->SSID, sizeof(pSSID->SSID), buf);
     } else {
-        strncpy(buf, pSSID->SSID, bufsize);
+        strncpy(buf, pSSID->SSID, SWL_MIN(bufsize, MAX_SSID_LEN));
+    }
+
+    if ((set & SET) && whm_mxl_mlo_checkMldConfigChange(pAP) && wld_secDmn_isAlive(pRad->hostapd)) {
+        SAH_TRACEZ_INFO(ME, "%s: Is part of MLD - force restart", pAP->alias);
+        return whm_mxl_restartHapd(pAP->pRadio);
     }
 
     /* Choose config flow */
@@ -512,7 +535,14 @@ int whm_mxl_vap_bssid(T_Radio* pR, T_AccessPoint* pAP, unsigned char* buf, int b
 }
 
 int whm_mxl_vap_sec_sync(T_AccessPoint* pAP, int set) {
+    T_Radio* pRad = pAP->pRadio;
+    ASSERTI_NOT_NULL(pRad, SWL_RC_INVALID_PARAM, ME, "pRad is NULL");
     int rc = 0;
+
+    if ((set & SET) && whm_mxl_mlo_checkMldConfigChange(pAP) && wld_secDmn_isAlive(pRad->hostapd)) {
+        SAH_TRACEZ_INFO(ME, "%s: Is part of MLD - force restart", pAP->alias);
+        return whm_mxl_restartHapd(pAP->pRadio);
+    }
 
     if ((set & SET) && (whm_mxl_chooseVapConfigFlow(pAP, WHM_MXL_CONFIG_TYPE_SECURITY) == WHM_MXL_CONFIG_FLOW_RECONF)) {
             SAH_TRACEZ_INFO(ME, "%s: Security sync requesting reconf", pAP->alias);
@@ -930,9 +960,9 @@ static void s_setOWETransitionBSSID_pwf(void* priv _UNUSED, amxd_object_t* objec
     ASSERTS_NOT_NULL(mxlVapVendorData, , ME, "mxlVapVendorData is NULL");
     char* oweTransitionBSSID = amxc_var_dyncast(cstring_t, newParamValues);
     swl_str_copy(mxlVapVendorData->OWETransBSSID, sizeof(mxlVapVendorData->OWETransBSSID), oweTransitionBSSID);
+    free(oweTransitionBSSID);
     /* NULL value is provided because value will be applied via conf writing and sighup*/
     whm_mxl_determineVapParamAction(pAP, amxd_param_get_name(param), NULL);
-    free(oweTransitionBSSID);
     SAH_TRACEZ_OUT(ME);
 }
 
@@ -946,9 +976,9 @@ static void s_setOWETransitionSSID_pwf(void* priv _UNUSED, amxd_object_t* object
     ASSERTS_NOT_NULL(mxlVapVendorData, , ME, "mxlVapVendorData is NULL");
     char* oweTransitionSSID = amxc_var_dyncast(cstring_t, newParamValues);
     swl_str_copy(mxlVapVendorData->OWETransSSID, sizeof(mxlVapVendorData->OWETransSSID), oweTransitionSSID);
+    free(oweTransitionSSID);
     /* NULL value is provided because value will be applied via conf writing and sighup*/
     whm_mxl_determineVapParamAction(pAP, amxd_param_get_name(param), NULL);
-    free(oweTransitionSSID);
     SAH_TRACEZ_OUT(ME);
 }
 
@@ -973,10 +1003,19 @@ static void s_setDisableBeaconProtection_pwf(void* priv _UNUSED, amxd_object_t* 
     amxd_object_t* vapObj = amxd_object_get_parent(object);
     T_AccessPoint* pAP = wld_ap_fromObj(vapObj);
     ASSERT_NOT_NULL(pAP, , ME, "No AccessPoint Mapped");
+    mxl_VapVendorData_t* mxlVapVendorData = mxl_vap_getVapVendorData(pAP);
+    ASSERT_NOT_NULL(mxlVapVendorData, , ME, "mxlVapVendorData is NULL");
     bool disableBeaconProt = amxc_var_dyncast(bool, newParamValues);
     T_Radio* pRad = (T_Radio*) pAP->pRadio;
-    if(wld_rad_checkEnabledRadStd(pRad, SWL_RADSTD_BE)) {
-      whm_mxl_determineVapParamAction(pAP, amxd_param_get_name(param), (disableBeaconProt ? "1" : "0"));
+
+    if (whm_mxl_rad_checkForceEnableBe(pRad)) {
+        mxlVapVendorData->disableBeaconProt = disableBeaconProt;
+        whm_mxl_updateDisableBeaconProt(pAP);
+        if (wld_secDmn_isAlive(pRad->hostapd) && whm_mxl_mlo_checkMldConfigChange(pAP)) {
+            whm_mxl_restartHapd(pRad);
+        } else {
+            whm_mxl_determineVapParamAction(pAP, amxd_param_get_name(param), (disableBeaconProt ? "1" : "0"));
+        }
     }
     SAH_TRACEZ_OUT(ME);
 }
@@ -1070,12 +1109,20 @@ static void s_setEnableWPA3PersonalCompatibility_pwf(void* priv _UNUSED, amxd_ob
     amxd_object_t* vapObj = amxd_object_get_parent(object);
     T_AccessPoint* pAP = wld_ap_fromObj(vapObj);
     ASSERT_NOT_NULL(pAP, , ME, "No AccessPoint Mapped");
+    T_Radio* pRad = pAP->pRadio;
+    ASSERT_NOT_NULL(pRad, , ME, "No Radio Mapped");
     mxl_VapVendorData_t* mxlVapVendorData = mxl_vap_getVapVendorData(pAP);
     ASSERT_NOT_NULL(mxlVapVendorData, , ME, "mxlVapVendorData is NULL");
     swl_rc_ne rc;
 
     bool EnableWPA3PersonalCompatibility = amxc_var_dyncast(bool, newParamValues);
     mxlVapVendorData->EnableWPA3PersonalCompatibility = EnableWPA3PersonalCompatibility;
+    if (wld_secDmn_isAlive(pRad->hostapd) && whm_mxl_mlo_checkMldConfigChange(pAP)) {
+        SAH_TRACEZ_INFO(ME, "%s: Is part of MLD - force restart", pAP->alias);
+        whm_mxl_restartHapd(pRad);
+        SAH_TRACEZ_OUT(ME);
+        return;
+    }
     if (EnableWPA3PersonalCompatibility == true) {
         SAH_TRACEZ_INFO(ME, "Enabling WPA3 Personal Compatibility Mode for %s, DON'T trust security mode set in PWHM!", pAP->alias);
         whm_mxl_toggleWPA3PersonalCompatibility(pAP);
@@ -1099,11 +1146,11 @@ static void s_setAggrConfig_pwf(void* priv _UNUSED, amxd_object_t* object, amxd_
     ASSERTS_NOT_NULL(mxlVapVendorData, , ME, "mxlVapVendorData is NULL");
     char* aggrConfig = amxc_var_dyncast(cstring_t, newParamValues);
     swl_str_copy(mxlVapVendorData->AggrConfig, sizeof(mxlVapVendorData->AggrConfig), aggrConfig);
+    free(aggrConfig);
     /* NULL value is provided because value will be applied via conf writing and sighup */
     if(whm_mxl_isCertModeEnabled()) {
         whm_mxl_determineVapParamAction(pAP, amxd_param_get_name(param), NULL);
     }
-    free(aggrConfig);
     SAH_TRACEZ_OUT(ME);
 }
 
@@ -1117,11 +1164,11 @@ static void s_setGroupMgmtCipher_pwf(void* priv _UNUSED, amxd_object_t* object, 
     ASSERTS_NOT_NULL(mxlVapVendorData, , ME, "mxlVapVendorData is NULL");
     char* cipher = amxc_var_dyncast(cstring_t, newParamValues);
     swl_str_copy(mxlVapVendorData->GroupMgmtCipher, sizeof(mxlVapVendorData->GroupMgmtCipher), cipher);
+    free(cipher);
     /* NULL value is provided because value will be applied via conf writing and sighup */
     if(whm_mxl_isCertModeEnabled()) {
         whm_mxl_determineVapParamAction(pAP, amxd_param_get_name(param), NULL);
     }
-    free(cipher);
     SAH_TRACEZ_OUT(ME);
 }
 
@@ -1135,11 +1182,11 @@ static void s_setGroupCipher_pwf(void* priv _UNUSED, amxd_object_t* object, amxd
     ASSERTS_NOT_NULL(mxlVapVendorData, , ME, "mxlVapVendorData is NULL");
     char* group_cipher = amxc_var_dyncast(cstring_t, newParamValues);
     swl_str_copy(mxlVapVendorData->GroupCipher, sizeof(mxlVapVendorData->GroupCipher), group_cipher);
+    free(group_cipher);
     /* NULL value is provided because value will be applied via conf writing and sighup */
     if(whm_mxl_isCertModeEnabled()) {
         whm_mxl_determineVapParamAction(pAP, amxd_param_get_name(param), NULL);
     }
-    free(group_cipher);
     SAH_TRACEZ_OUT(ME);
 }
 
@@ -1151,13 +1198,13 @@ static void s_setQoSMap_pwf(void* priv _UNUSED, amxd_object_t* object, amxd_para
     ASSERT_NOT_NULL(pAP, , ME, "No AccessPoint Mapped");
     mxl_VapVendorData_t* mxlVapVendorData = mxl_vap_getVapVendorData(pAP);
     ASSERTS_NOT_NULL(mxlVapVendorData, , ME, "mxlVapVendorData is NULL");
-    char* qos_map_set = amxc_var_dyncast(cstring_t, newParamValues);
-    swl_str_copy(mxlVapVendorData->QoSMap, sizeof(mxlVapVendorData->QoSMap), qos_map_set);
+    char* qosMapSet = amxc_var_dyncast(cstring_t, newParamValues);
+    swl_str_copy(mxlVapVendorData->QoSMap, sizeof(mxlVapVendorData->QoSMap), qosMapSet);
+    free(qosMapSet);
     /* NULL value is provided because value will be applied via conf writing and sighup */
-    if(whm_mxl_isCertModeEnabled()) {
+    if (whm_mxl_isCertModeEnabled()) {
         whm_mxl_determineVapParamAction(pAP, amxd_param_get_name(param), NULL);
     }
-    free(qos_map_set);
     SAH_TRACEZ_OUT(ME);
 }
 
@@ -1385,14 +1432,12 @@ static void s_setMloId_pwf(void* priv _UNUSED, amxd_object_t* object,
     amxd_object_t* vapObj = amxd_object_get_parent(amxd_object_get_parent(object));
     T_AccessPoint* pAP = wld_ap_fromObj(vapObj);
     ASSERT_NOT_NULL(pAP, , ME, "No AccessPoint Mapped");
-    mxl_VapVendorData_t* vapVendor = mxl_vap_getVapVendorData(pAP);
-    ASSERTS_NOT_NULL(vapVendor, , ME, "vapVendor is NULL");
 
-    int32_t currMloId = vapVendor->mldLink.mloId;
     int32_t newMloId = amxc_var_get_int32_t(newParamValues);
-
-    ASSERT_FALSE(whm_mxl_mlo_confVap(pAP, currMloId, newMloId) < SWL_RC_OK, , ME,
-                 "MLO: Failed to set MloID %d for %s", newMloId, pAP->alias);
+    if (newMloId > IGNORE_MLO_ID) {
+        ASSERT_FALSE(whm_mxl_mlo_configureMld(pAP, newMloId) < SWL_RC_OK, , ME,
+                     "MLO: Failed to set MloID %d for %s", newMloId, pAP->alias);
+    }
 
     SAH_TRACEZ_OUT(ME);
 }
@@ -1408,34 +1453,10 @@ static void s_setApMldMac_pwf(void* priv _UNUSED, amxd_object_t* object,
     mxl_VapVendorData_t* vapVendor = mxl_vap_getVapVendorData(pAP);
     ASSERTS_NOT_NULL(vapVendor, , ME, "vapVendor is NULL");
     const char* mloMacAddr = amxc_var_constcast(cstring_t, newParamValues);
-    swl_macChar_t newApMldMac;
-    swl_mac_charToStandard(&newApMldMac, mloMacAddr);
+    swl_macBin_t mldMacBin = SWL_MAC_BIN_NEW();
+    swl_mac_charToBin(&mldMacBin, (swl_macChar_t*) mloMacAddr);
 
-    ASSERT_FALSE(swl_mac_charMatches(&vapVendor->mldLink.apMldMac, &newApMldMac), ,
-                 ME, "MLO: ApMldMac equals new MACAddress for link %s", pAP->alias);
-    ASSERT_FALSE(vapVendor->mldLink.mloId == NO_LINK_ID, , ME,
-                 "MLO: MloId is not set for %s", pAP->alias);
-
-    T_AccessPoint* pSiblingAP = whm_mxl_mlo_getSiblingAP(pAP, vapVendor->mldLink.mloId);
-    ASSERT_NOT_NULL(pSiblingAP, , ME, "MLO: MLD(%d) is not initialized yet",
-                    vapVendor->mldLink.mloId);
-    amxd_object_t* pSiblingMLO = whm_mxl_mlo_getMloObject(pSiblingAP);
-    ASSERT_NOT_NULL(pSiblingMLO, , ME, "MLO is not Mapped");
-    mxl_VapVendorData_t* sibVapVendor = mxl_vap_getVapVendorData(pSiblingAP);
-    ASSERTS_NOT_NULL(sibVapVendor, , ME, "vapVendor is NULL");
-
-    SAH_TRACEZ_INFO(ME, "MLO: config ap_mld_mac for MLD(%d) with %s",
-                     vapVendor->mldLink.mloId, newApMldMac.cMac);
-
-    // Handle default value case
-    if (swl_mac_charIsNull(&newApMldMac))
-        SWL_MAC_BIN_TO_CHAR(&newApMldMac, ((T_SSID*) pAP->pSSID)->BSSID);
-
-    swl_str_copy(vapVendor->mldLink.apMldMac.cMac, SWL_MAC_CHAR_LEN, newApMldMac.cMac);
-    swl_str_copy(sibVapVendor->mldLink.apMldMac.cMac, SWL_MAC_CHAR_LEN, newApMldMac.cMac);
-    amxd_object_set_value(cstring_t, object, "ApMldMac", newApMldMac.cMac);
-    amxd_object_set_value(cstring_t, pSiblingMLO, "ApMldMac", newApMldMac.cMac);
-    whm_mxl_restartHapd(pAP->pRadio);
+    whm_mxl_mlo_configureMldMac(pAP, &mldMacBin, true);
 
     SAH_TRACEZ_OUT(ME);
 }
@@ -1454,11 +1475,11 @@ static void s_setMloConfig_ocf(void* priv _UNUSED, amxd_object_t* object,
         const char* pname = amxc_var_key(newValue);
         if(swl_str_matches(pname, "WdsSingleMlAssoc")) {
             bool wdsSingleMlAssoc = amxc_var_dyncast(bool, newValue);
-            vapVendor->mldLink.wdsSingleMlAssoc = wdsSingleMlAssoc;
+            vapVendor->wdsSingleMlAssoc = wdsSingleMlAssoc;
             whm_mxl_determineVapParamAction(pAP, pname, (wdsSingleMlAssoc ? "1" : "0"));
         } else if(swl_str_matches(pname, "WdsPrimaryLink")) {
             bool wdsPrimaryLink = amxc_var_dyncast(bool, newValue);
-            vapVendor->mldLink.wdsPrimaryLink = wdsPrimaryLink;
+            vapVendor->wdsPrimaryLink = wdsPrimaryLink;
             whm_mxl_determineVapParamAction(pAP, pname, (wdsPrimaryLink ? "1" : "0"));
         } else {
             continue;

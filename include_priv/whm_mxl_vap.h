@@ -56,12 +56,22 @@ typedef struct {
     bool h2eRequired;
     /* Enable or Disable ignoring of 11vDiassoc timer */
     bool ignore11vDiassoc;
-    /* MLD Link info */
-    whm_mxl_mlo_link_t mldLink; 
+
+    /* Pointer to MLD Vap - valid if AP is part of MLD */
+    whm_mxl_mld_t *pMld;
+    /* Pointer to MLD Link - valid if AP is part of MLD */
+    whm_mxl_link_t *pLink;
+    /* WDS ML Single Assoc */
+    bool wdsSingleMlAssoc;
+    /* WDS Primary Link*/
+    bool wdsPrimaryLink;
+
     /* Setting the QoS Map */
     char QoSMap[70];
     /* Setting the Wildcard SSID */
     uint8_t hiddenSSIDType;
+    /* Disable Beacon Protection */
+    bool disableBeaconProt;
 } mxl_VapVendorData_t;
 
 /* Macros Section */
@@ -83,6 +93,7 @@ int whm_mxl_vap_multiap_update_type(T_AccessPoint* pAP);
 int whm_mxl_vap_clean_sta(T_AccessPoint* pAP, char* macStr, int macStrLen);
 swl_rc_ne whm_mxl_vap_updated_neighbor(T_AccessPoint* pAP, T_ApNeighbour* pApNeighbor);
 swl_rc_ne whm_mxl_vap_transfer_sta(T_AccessPoint* pAP, wld_transferStaArgs_t* params);
+swl_rc_ne whm_mxl_setVapEvtHandlers(T_AccessPoint* pAP);
 bool mxl_isApReadyToProcessVendorCmd(T_AccessPoint* pAP);
 swl_rc_ne whm_mxl_vap_addWdsIfaceEvent(T_AccessPoint* pAP, wld_wds_intf_t* wdsIntf);
 swl_rc_ne whm_mxl_vap_delWdsIfaceEvent(T_AccessPoint* pAP, wld_wds_intf_t* wdsIntf);

@@ -1032,11 +1032,12 @@
                     * Assigning the same MloId to VAPs(links) will group
                     * & create an MLD with those VAPs.
                     * Currently MxL MLO allows MLDs creation with 2 links
-                    * NOTE: Valid MloId's are Whole Numbers. -1 indicates
-                    *       VAP isn't part of any MLD
+                    * NOTE: Valid MloId's are Whole Numbers.
+                    *       -1 indicates VAP isn't part of any MLD
+                    *       -2 indicates to ignore value during configuration
                     */
                     %persistent int32 MloId {
-                        default -1;
+                        default -2;
                     }
 
                    /**
@@ -1470,15 +1471,21 @@
                     default 10000;
                 }
             }
+            /*
+             * Multi-Link.
+             */
+            %persistent object MLD {
+                list dumpMldAps() <!import:${module}:_whm_mxl_mlo_dumpApMlds!>;
+            }
         }
     }
 }
 
 %populate {
     on event regexp("dm:object-(added|changed)") call whm_mxl_vap_setVendorData_ocf
-        filter 'path matches "WiFi\.AccessPoint\.[0-32]+\.Vendor\.+"';
+        filter 'path matches "WiFi\.AccessPoint\.[0-9]+\.Vendor\..+"';
     on event "dm:object-changed" call whm_mxl_rad_updateObssCoexistence
         filter 'path matches "WiFi\.Radio\.[0-9]+\." && (contains("parameters.ObssCoexistenceEnable"))';
     on event "dm:object-changed" call whm_mxl_vap_updateMaxAssociatedDevices
-        filter 'path matches "WiFi\.AccessPoint\.[0-32]+\." && (contains("parameters.MaxAssociatedDevices"))';
+        filter 'path matches "WiFi\.AccessPoint\.[0-9]+\." && (contains("parameters.MaxAssociatedDevices"))';
 }

@@ -189,7 +189,7 @@ int whm_mxl_rad_supports(T_Radio* pRad, char* buf _UNUSED, int bufsize _UNUSED) 
 
     // set vendor events handler after nl80211Listener is created (ie when radio wiphyId is known: after successful wrad_support)
     SAH_TRACEZ_INFO(ME, "%s: Set vendor event handler", pRad->Name);
-    rc = mxl_evt_setVendorEvtHandlers(pRad);
+    rc = whm_mxl_evt_setVendorEvtHandlers(pRad);
 
     return rc;
 }
@@ -228,7 +228,7 @@ int whm_mxl_rad_createHook(T_Radio* pRad) {
 
     // set vendor events handler
     SAH_TRACEZ_INFO(ME, "%s: Set vendor event handler", pRad->Name);
-    rc = mxl_evt_setVendorEvtHandlers(pRad);
+    rc = whm_mxl_evt_setVendorEvtHandlers(pRad);
 
     // Register to event queues
     wld_event_add_callback(gWld_queue_vap_onStatusChange, &s_vapStatusEventCb);
@@ -290,6 +290,19 @@ static void s_deinitRadVendorData(T_Radio* pRad) {
     free(vendorData);
 }
 
+static swl_rc_ne s_deleteAllLinksInRadio(T_Radio* pRad) {
+    ASSERT_NOT_NULL(pRad, SWL_RC_ERROR, ME, "pRad is NULL");
+    T_AccessPoint* pAP;
+    wld_rad_forEachAp(pAP, pRad) {
+        if (whm_mxl_utils_isDummyVap(pAP)) {
+            continue;
+        }
+        whm_mxl_mlo_deleteLink(pAP);
+    }
+
+    return SWL_RC_OK;
+}
+
 void whm_mxl_rad_destroyHook(T_Radio* pRad) {
     ASSERT_NOT_NULL(pRad, , ME, "NULL");
     wld_event_remove_callback(gWld_queue_vap_onStatusChange, &s_vapStatusEventCb);
@@ -297,6 +310,7 @@ void whm_mxl_rad_destroyHook(T_Radio* pRad) {
     whm_mxl_reconfMngr_deinit(pRad);
     whm_mxl_rad_delVap_timer_deinit(pRad);
     whm_mxl_monitor_deinit(pRad);
+    s_deleteAllLinksInRadio(pRad);
     s_deinitRadVendorData(pRad);
     CALL_NL80211_FTA(mfn_wrad_destroy_hook, pRad);
 }
@@ -1435,45 +1449,49 @@ static void s_setAcsConfig_ocf(void* priv _UNUSED, amxd_object_t* object, const 
     amxc_var_for_each(newValue, newParamValues) {
         char* newValStr = NULL; 
         const char* pname = amxc_var_key(newValue);
-        if(swl_str_matches(pname, "AcsFallbackChan")) {
+        if (swl_str_matches(pname, "AcsFallbackChan")) {
             newValStr = amxc_var_dyncast(cstring_t, newValue);
             whm_mxl_determineRadParamAction(pRad, pname, newValStr);
-        } else if(swl_str_matches(pname, "AcsScanMode")) {
+            free(newValStr);
+        } else if (swl_str_matches(pname, "AcsScanMode")) {
             newVal = amxc_var_dyncast(bool, newValue);
             whm_mxl_determineRadParamAction(pRad, pname, (newVal ? "1" : "0"));
-        } else if(swl_str_matches(pname, "AcsUpdateDoSwitch")) {
+        } else if (swl_str_matches(pname, "AcsUpdateDoSwitch")) {
             newVal = amxc_var_dyncast(bool, newValue);
             whm_mxl_determineRadParamAction(pRad, pname, (newVal ? "1" : "0"));
-        } else if(swl_str_matches(pname, "AcsFils")) {
+        } else if (swl_str_matches(pname, "AcsFils")) {
             newVal = amxc_var_dyncast(bool, newValue);
             whm_mxl_determineRadParamAction(pRad, pname, (newVal ? "1" : "0"));
-        } else if(swl_str_matches(pname, "Acs6gPunctMode") && wld_rad_is_6ghz(pRad)) {
+        } else if (swl_str_matches(pname, "Acs6gPunctMode") && wld_rad_is_6ghz(pRad)) {
             newVal = amxc_var_dyncast(bool, newValue);
             whm_mxl_determineRadParamAction(pRad, pname, (newVal ? "1" : "0"));
-        } else if(swl_str_matches(pname, "Acs6gOptChList")) {
+        } else if (swl_str_matches(pname, "Acs6gOptChList")) {
             newValStr = amxc_var_dyncast(cstring_t, newValue);
             whm_mxl_determineRadParamAction(pRad, pname, newValStr);
-        } else if(swl_str_matches(pname, "AcsStrictChList")) {
+            free(newValStr);
+        } else if (swl_str_matches(pname, "AcsStrictChList")) {
             newValStr = amxc_var_dyncast(cstring_t, newValue);
             whm_mxl_determineRadParamAction(pRad, pname, newValStr);
-        } else if(swl_str_matches(pname, "AcsBgScanInterval")) {
+            free(newValStr);
+        } else if (swl_str_matches(pname, "AcsBgScanInterval")) {
             if (pRadVendor) {
                 pRadVendor->bgAcsInterval = amxc_var_dyncast(uint16_t, newValue);
                 whm_mxl_configureBgAcs(pRad, pRadVendor->bgAcsInterval);
             }
-        } else if(swl_str_matches(pname, "AcsChanList")) {
+        } else if (swl_str_matches(pname, "AcsChanList")) {
             newValStr = amxc_var_dyncast(cstring_t, newValue);
             whm_mxl_determineRadParamAction(pRad, pname, newValStr);
-        } else if(swl_str_matches(pname, "AcsFallbackPrimaryChan")) {
+            free(newValStr);
+        } else if (swl_str_matches(pname, "AcsFallbackPrimaryChan")) {
             ASSERT_NOT_NULL(pRadVendor, , ME, "pRadVendor is NULL");
             pRadVendor->AcsFbPrimChan = amxc_var_dyncast(int32_t, newValue);
-        } else if(swl_str_matches(pname, "AcsFallbackSecChan")) {
+        } else if (swl_str_matches(pname, "AcsFallbackSecChan")) {
             ASSERT_NOT_NULL(pRadVendor, , ME, "pRadVendor is NULL");
             pRadVendor->AcsFbSecChan = amxc_var_dyncast(int32_t, newValue);
-        } else if(swl_str_matches(pname, "AcsFallbackBW")) {
+        } else if (swl_str_matches(pname, "AcsFallbackBW")) {
             ASSERT_NOT_NULL(pRadVendor, , ME, "pRadVendor is NULL");
             pRadVendor->AcsFbBw = amxc_var_dyncast(int32_t, newValue);
-            if(pRadVendor->AcsFbBw != 0) {
+            if (pRadVendor->AcsFbBw != 0) {
                 char AcsFallbackChannel[128] = {0};
                 swl_str_catFormat(AcsFallbackChannel, sizeof(AcsFallbackChannel), "%d %d %d", pRadVendor->AcsFbPrimChan, pRadVendor->AcsFbSecChan, pRadVendor->AcsFbBw);
                 amxd_object_set_value(cstring_t, object, "AcsFallbackChan", AcsFallbackChannel);
@@ -1485,7 +1503,6 @@ static void s_setAcsConfig_ocf(void* priv _UNUSED, amxd_object_t* object, const 
         } else {
             continue;
         }
-        free(newValStr);
     }
     SAH_TRACEZ_OUT(ME);
 }
