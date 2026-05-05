@@ -121,10 +121,8 @@ SWL_TABLE(sVendorParamsOdlToConf,
               {"Ignore40MhzIntolerant",         "ignore_40_mhz_intolerant"},
               {"ProbeReqListTimer",             "ProbeReqListTimer"},
               {"DfsChStateFile",                "dfs_channels_state_file_location"},
-#ifdef CONFIG_VENDOR_MXL_PROPRIETARY
               {"DfsDebugChan",                  "dfs_debug_chan"},
               {"ZwdfsDebugChan",                "zwdfs_debug_chan"},
-#endif /* CONFIG_VENDOR_MXL_PROPRIETARY */
               {"SubBandDFS",                    "sub_band_dfs"},
               {"TwtResponderSupport",           "twt_responder_support"},
               {"HeMacTwtResponderSupport",      "he_mac_twt_responder_support"},
@@ -143,7 +141,6 @@ SWL_TABLE(sVendorParamsOdlToConf,
               {"ScanActiveTotalPerChannel",     "scan_active_total_per_channel"},
               {"ChannelTransitionDelayFactor",  "channel_transition_delay_factor"},
               {"ScanActivityThreshold",         "scan_activity_threshold"},
-#ifdef CONFIG_VENDOR_MXL_PROPRIETARY
               {"AcsFallbackChan",               "acs_fallback_chan"},
               {"AcsScanMode",                   "acs_scan_mode"},
               {"AcsUpdateDoSwitch",             "acs_update_do_switch"},
@@ -153,7 +150,6 @@ SWL_TABLE(sVendorParamsOdlToConf,
               {"Acs6gPunctMode",                "acs_6g_punct_mode"},
               {"AcsBgScanInterval",             "acs_bgscan_interval"},
               {"AcsChanList",                   "chanlist"},
-#endif /* CONFIG_VENDOR_MXL_PROPRIETARY */
               {"BackgroundCac",                 "background_cac"},
               {"StartAfter",                    "start_after"},
               {"StartAfterDelay",               "start_after_delay"},
@@ -338,6 +334,7 @@ SWL_TABLE(sVendorParamsOdlToConf,
               {"ApMldMac",                      "ap_mld_mac"},
               {"WdsSingleMlAssoc",              "wds_single_ml_assoc"},
               {"WdsPrimaryLink",                "wds_primary_link"},
+              {"WdsForce6GAssoc",               "mld_wds_force_6g_assoc"},
               {"SoftBlockAclEnable",            "soft_block_acl_enable"},
               {"SoftBlockAclWaitTime",          "soft_block_acl_wait_time"},
               {"SoftBlockAclAllowTime",         "soft_block_acl_allow_time"},
@@ -414,7 +411,6 @@ SWL_TABLE(sRadCfgParamsActionMap,
               {"Ignore40MhzIntolerant",         HAPD_ACTION_NEED_RESTART},
               {"HtCapabilities",                HAPD_ACTION_NEED_RESTART},
               {"VhtCapabilities",               HAPD_ACTION_NEED_RESTART},
-#ifdef CONFIG_VENDOR_MXL_PROPRIETARY
               {"AcsFallbackChan",               HAPD_ACTION_NEED_RESTART},
               {"AcsScanMode",                   HAPD_ACTION_NEED_RESTART},
               {"AcsUpdateDoSwitch",             HAPD_ACTION_NEED_RESTART},
@@ -423,7 +419,6 @@ SWL_TABLE(sRadCfgParamsActionMap,
               {"AcsStrictChList",               HAPD_ACTION_NEED_RESTART},
               {"Acs6gPunctMode",                HAPD_ACTION_NEED_RESTART},
               {"AcsChanList",                   HAPD_ACTION_NEED_RESTART},
-#endif /* CONFIG_VENDOR_MXL_PROPRIETARY */
               {"AfcdSock",                      HAPD_ACTION_NEED_RESTART},
               {"AfcOpClass",                    HAPD_ACTION_NEED_RESTART},
               {"AfcFrequencyRange",             HAPD_ACTION_NEED_RESTART},
@@ -443,10 +438,8 @@ SWL_TABLE(sRadCfgParamsActionMap,
               {"ObssBeaconRssiThreshold",       HAPD_ACTION_NEED_TOGGLE},
               {"ProbeReqListTimer",             HAPD_ACTION_NEED_TOGGLE},
               {"DfsChStateFile",                HAPD_ACTION_NEED_TOGGLE},
-#ifdef CONFIG_VENDOR_MXL_PROPRIETARY
               {"DfsDebugChan",                  HAPD_ACTION_NEED_TOGGLE},
               {"ZwdfsDebugChan",                HAPD_ACTION_NEED_TOGGLE},
-#endif /* CONFIG_VENDOR_MXL_PROPRIETARY */
               {"SubBandDFS",                    HAPD_ACTION_NEED_TOGGLE},
               {"TwtResponderSupport",           HAPD_ACTION_NEED_TOGGLE},
               {"HeMacTwtResponderSupport",      HAPD_ACTION_NEED_TOGGLE},
@@ -766,6 +759,7 @@ SWL_TABLE(sVapCfgParamsActionMap,
               //Action applied with update hostapd conf
               {"MgmtFramePowerControl",         HAPD_ACTION_NEED_UPDATE_CONF},
               {"Ignore11vDiassoc",              HAPD_ACTION_NEED_UPDATE_CONF},
+              {"WdsForce6GAssoc",               HAPD_ACTION_NEED_UPDATE_CONF},
               //Action applied with the Reconf of the AccessPoint
               {"EhtMacEpcsPrioAccess",          HAPD_ACTION_NEED_RECONF},
               ));
@@ -1338,7 +1332,6 @@ swl_rc_ne whm_mxl_updateOnEventMaxAssociatedDevices(T_AccessPoint* pAP) {
     return SWL_RC_OK;
 }
 
-#ifdef CONFIG_VENDOR_MXL_PROPRIETARY
 /**
  * @brief configure BG ACS Scan Interval
  *
@@ -1375,7 +1368,6 @@ swl_rc_ne whm_mxl_configureBgAcs(T_Radio* pRad, uint16_t bgAcsInterval) {
 
     return SWL_RC_OK;
 }
-#endif /* CONFIG_VENDOR_MXL_PROPRIETARY */
 
 /**
  * @brief wraper for the generic pwhm send hostapd command

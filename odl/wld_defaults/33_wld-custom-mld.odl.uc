@@ -1,15 +1,26 @@
 %populate {
     object WiFi {
         object 'SSID' {
-{% for ( let Itf in BD.Interfaces ) : if ( BDfn.isInterfaceWirelessAp(Itf.Name) && BDfn.isInterfaceLan(Itf.Name) ) : %}
+{% for ( let Itf in BD.Interfaces ) : if ( BDfn.isInterfaceWirelessAp(Itf.Name) ) : %}
             object '{{Itf.Alias}}' {
+{% if (Itf.MLDUnit != null && Itf.MLDUnit != undefined && int(Itf.MLDUnit) > -1 ) : %}
+                parameter MLDUnit = {{Itf.MLDUnit}};
+{% else %}
                 parameter MLDUnit = -1;
+{% endif %}
             }
 {% endif; endfor; %}
-{% for ( let Itf in BD.Interfaces ) : if ( BDfn.isInterfaceWirelessAp(Itf.Name) && BDfn.isInterfaceGuest(Itf.Name) ) : %}
+        }
+        object AccessPoint {
+{% for ( let Itf in BD.Interfaces ) : if ( BDfn.isInterfaceWirelessAp(Itf.Name) ) : %}
+{% if (Itf.MLDUnit != null && Itf.MLDUnit != undefined && int(Itf.MLDUnit) > -1 ) : %}
             object '{{Itf.Alias}}' {
-                parameter MLDUnit = -1;
+                object Security {
+                    parameter ModeEnabled = "WPA3-Personal";
+                    parameter SAEPassphrase = "password";
+                }
             }
+{% endif %}
 {% endif; endfor; %}
         }
     }

@@ -9,11 +9,6 @@ include makefile.inc
 
 NOW = $(shell date +"%Y-%m-%d(%H:%M:%S %z)")
 
-ifeq ($(CONFIG_MXL_WLAN_OSS_BUILD),y)
-BUILD_TYPE:=oss_
-else
-BUILD_TYPE:=
-endif
 # Extra destination directories
 PKGDIR = ./output/$(MACHINE)/pkg/
 
@@ -39,19 +34,19 @@ clean:
 
 install: all
 	$(INSTALL) -d -m 0755 $(DEST)/etc/amx/wld/wld_defaults
-	$(INSTALL) -D -p -m 0644 $(BUILD_TYPE)odl/wld_defaults/* $(DEST)/etc/amx/wld/wld_defaults/
+	$(INSTALL) -D -p -m 0644 odl/wld_defaults/* $(DEST)/etc/amx/wld/wld_defaults/
 	$(INSTALL) -d -m 0755 $(DEST)/etc/amx/wld/modules/$(COMPONENT)/$(COMPONENT)_defaults
-	$(INSTALL) -D -p -m 0644 $(BUILD_TYPE)odl/$(COMPONENT)_definition.odl $(DEST)/etc/amx/wld/modules/$(COMPONENT)/$(COMPONENT)_definition.odl
-	$(INSTALL) -D -p -m 0644 $(BUILD_TYPE)odl/$(COMPONENT).odl $(DEST)/etc/amx/wld/modules/$(COMPONENT)/$(COMPONENT).odl
+	$(INSTALL) -D -p -m 0644 odl/$(COMPONENT)_definition.odl $(DEST)/etc/amx/wld/modules/$(COMPONENT)/$(COMPONENT)_definition.odl
+	$(INSTALL) -D -p -m 0644 odl/$(COMPONENT).odl $(DEST)/etc/amx/wld/modules/$(COMPONENT)/$(COMPONENT).odl
 	$(INSTALL) -D -p -m 0755 src/$(COMPONENT).so $(DEST)/usr/lib/amx/wld/modules/$(COMPONENT).so
 	$(INSTALL) -D -p -m 0755 scripts/modPreInit.sh $(DEST)/usr/lib/amx/wld/modules/mod_init/modPreInit.sh
 
 package: all
 	$(INSTALL) -d -m 0755 $(PKGDIR)/etc/amx/wld/wld_defaults
-	$(INSTALL) -D -p -m 0644 $(BUILD_TYPE)odl/wld_defaults/* $(PKGDIR)/etc/amx/wld/wld_defaults/
+	$(INSTALL) -D -p -m 0644 odl/wld_defaults/* $(PKGDIR)/etc/amx/wld/wld_defaults/
 	$(INSTALL) -d -m 0755 $(PKGDIR)/etc/amx/wld/modules/$(COMPONENT)/$(COMPONENT)_defaults
-	$(INSTALL) -D -p -m 0644 $(BUILD_TYPE)odl/$(COMPONENT)_definition.odl $(PKGDIR)/etc/amx/wld/modules/$(COMPONENT)/$(COMPONENT)_definition.odl
-	$(INSTALL) -D -p -m 0644 $(BUILD_TYPE)odl/$(COMPONENT).odl $(PKGDIR)/etc/amx/wld/modules/$(COMPONENT)/$(COMPONENT).odl
+	$(INSTALL) -D -p -m 0644 odl/$(COMPONENT)_definition.odl $(PKGDIR)/etc/amx/wld/modules/$(COMPONENT)/$(COMPONENT)_definition.odl
+	$(INSTALL) -D -p -m 0644 odl/$(COMPONENT).odl $(PKGDIR)/etc/amx/wld/modules/$(COMPONENT)/$(COMPONENT).odl
 	$(INSTALL) -D -p -m 0755 src/$(COMPONENT).so $(PKGDIR)/usr/lib/amx/wld/modules/$(COMPONENT).so
 	$(INSTALL) -D -p -m 0755 scripts/modPreInit.sh $(PKGDIR)/usr/lib/amx/wld/modules/mod_init/modPreInit.sh
 	cd $(PKGDIR) && $(TAR) -czvf ../$(COMPONENT)-$(VERSION).tar.gz .

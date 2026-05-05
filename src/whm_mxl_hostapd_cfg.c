@@ -57,7 +57,6 @@ SWL_TABLE(sChWidthIDsMaps,
 *                           Radio Related Configurations                       *
 *                                                                              *
 *  *****************************************************************************/
-#ifdef CONFIG_VENDOR_MXL_PROPRIETARY
 static swl_rc_ne whm_mxl_rad_acsUpdateConfigMap(T_Radio* pRad, mxl_VendorData_t* pRadVendor, swl_mapChar_t* configMap) {
     amxd_object_t* acsObj = amxd_object_get(pRadVendor->pBus, "ACS");
     ASSERT_NOT_NULL(acsObj, SWL_RC_ERROR, ME, "No ACS vendor obj");
@@ -112,7 +111,6 @@ static swl_rc_ne whm_mxl_rad_acsUpdateConfigMap(T_Radio* pRad, mxl_VendorData_t*
 
     return SWL_RC_OK;
 }
-#endif /* CONFIG_VENDOR_MXL_PROPRIETARY */
 
 static swl_rc_ne whm_mxl_rad_afcUpdateConfigMap(amxd_object_t* pVendorObj, swl_mapChar_t* configMap) {
     ASSERT_NOT_NULL(pVendorObj, SWL_RC_ERROR, ME, "pVendorObj is NULL");
@@ -733,10 +731,8 @@ static swl_rc_ne s_mxl_rad_updateConfig(T_Radio* pRad, mxl_VendorData_t* pRadVen
     uint32_t max_bss = wld_rad_countMappedAPs(pRad);
     char *dfsChStateFile = amxd_object_get_value(cstring_t, pVendorObj, "DfsChStateFile", NULL);
     char *setCcaTh = amxd_object_get_value(cstring_t, pVendorObj, "SetCcaTh", NULL);
-#ifdef CONFIG_VENDOR_MXL_PROPRIETARY
     swl_radBw_e curBandwidth = pRad->operatingChannelBandwidth;
     swl_chanspec_t tgtChspec = wld_chanmgt_getTgtChspec(pRad);
-#endif /* CONFIG_VENDOR_MXL_PROPRIETARY */
 
     /* Delete unsupported params first */
     if (swl_mapChar_has(configMap, "mbssid")) {
@@ -762,7 +758,6 @@ static swl_rc_ne s_mxl_rad_updateConfig(T_Radio* pRad, mxl_VendorData_t* pRadVen
         }
         /* mod-whm should supply the max_bss count to the hostapd for the MBSSID feature */
         swl_mapCharFmt_addValInt32(configMap, "max_bss", max_bss);
-#ifdef CONFIG_VENDOR_MXL_PROPRIETARY
         if(pRad->autoChannelEnable) {
             /* Setting the acs_eht_mode in the hostapd_conf when ACS is enabled in case of 320MHz*/
             if(tgtChspec.bandwidth == SWL_BW_320MHZ) {
@@ -775,7 +770,6 @@ static swl_rc_ne s_mxl_rad_updateConfig(T_Radio* pRad, mxl_VendorData_t* pRadVen
                 }
             }
         }
-#endif /* CONFIG_VENDOR_MXL_PROPRIETARY */
         if(wld_rad_checkEnabledRadStd(pRad, SWL_RADSTD_BE)) {
             WHM_MXL_NE_SET_PARAM(punctureBitMap, 0, configMap, "punct_bitmap");
         }
@@ -830,14 +824,12 @@ static swl_rc_ne s_mxl_rad_updateConfig(T_Radio* pRad, mxl_VendorData_t* pRadVen
         swl_mapCharFmt_addValStr(configMap, "sCcaTh", "%s", setCcaTh);
     }
     free(setCcaTh);
-#ifdef CONFIG_VENDOR_MXL_PROPRIETARY
     if(amxd_object_get_value(int32_t, pVendorObj, "DfsDebugChan", NULL) != -1) {
         swl_mapCharFmt_addValInt32(configMap, "dfs_debug_chan", amxd_object_get_value(int32_t, pVendorObj, "DfsDebugChan", NULL));
     }
     if(amxd_object_get_value(int32_t, pVendorObj, "ZwdfsDebugChan", NULL) != -1) {
         swl_mapCharFmt_addValInt32(configMap, "zwdfs_debug_chan", amxd_object_get_value(int32_t, pVendorObj, "ZwdfsDebugChan", NULL));
     }
-#endif /* CONFIG_VENDOR_MXL_PROPRIETARY */
     /* Configure 80211AX Only Params */
     if(wld_rad_checkEnabledRadStd(pRad, SWL_RADSTD_AX)) {
         /* Configure AX MxL Params */
@@ -862,7 +854,6 @@ static swl_rc_ne s_mxl_rad_updateConfig(T_Radio* pRad, mxl_VendorData_t* pRadVen
         s_rad_configEhtCapabs(pRad, configMap);
     }
 
-#ifdef CONFIG_VENDOR_MXL_PROPRIETARY
     /* Prepare hostapd_conf ACS parameters */
     whm_mxl_rad_acsUpdateConfigMap(pRad, pRadVendor, configMap);
     SAH_TRACEZ_INFO(ME, "%s autoChannelEnable : %d", pRad->Name, pRad->autoChannelEnable);
@@ -885,9 +876,6 @@ static swl_rc_ne s_mxl_rad_updateConfig(T_Radio* pRad, mxl_VendorData_t* pRadVen
             swl_mapCharFmt_addValInt32(configMap, "acs_bgscan_interval", pRadVendor->bgAcsInterval);
         }
     } else if (pRadVendor->firstNonDfs) {
-#else
-    if (pRadVendor->firstNonDfs) {
-#endif /* CONFIG_VENDOR_MXL_PROPRIETARY */
         SAH_TRACEZ_INFO(ME, "%s first_non_dfs : %d", pRad->Name, pRadVendor->firstNonDfs);
         /* Set hostapd_conf first_non_dfs parameters */
         swl_mapCharFmt_addValStr(configMap, "channel", "%s", "first_non_dfs");
@@ -984,11 +972,10 @@ static void whm_mxl_vap_mloConfig(T_AccessPoint* pAP, swl_mapChar_t* configMap) 
     if (swl_mapChar_has(configMap, "mld_ap"))
         swl_mapChar_delete(configMap, "mld_ap");
 
-    if (whm_mxl_mlo_checkMloEnable(pAP)) {
+    whm_mxl_mld_t* pMld = whm_mxl_mlo_getMldVap(pAP);
+    if (whm_mxl_mlo_getMldStatus(pMld)) {
         mxl_VapVendorData_t* vapVendor = mxl_vap_getVapVendorData(pAP);
         ASSERTS_NOT_NULL(vapVendor, , ME, "vapVendor is NULL");
-        whm_mxl_mld_t* pMld = vapVendor->pMld;
-        ASSERT_NOT_NULL(pMld, , ME, "pMld is NULL");
         swl_macChar_t mldMacChar = SWL_MAC_CHAR_NEW();
         swl_mac_binToChar(&mldMacChar, &pMld->apMldMac);
 
@@ -1001,6 +988,8 @@ static void whm_mxl_vap_mloConfig(T_AccessPoint* pAP, swl_mapChar_t* configMap) 
                                  vapVendor->wdsSingleMlAssoc);
         swl_mapCharFmt_addValStr(configMap, "wds_primary_link", "%d",
                                  vapVendor->wdsPrimaryLink);
+        swl_mapCharFmt_addValStr(configMap, "mld_wds_force_6g_assoc", "%d",
+                                 vapVendor->wdsForce6GAssoc);
     } else {
         swl_mapCharFmt_addValInt32(configMap, "mlo_enable", 0);
     }
@@ -1307,11 +1296,6 @@ static swl_rc_ne s_mxl_vap_updateConfig(T_AccessPoint* pAP, swl_mapChar_t* confi
     WHM_MXL_GT_SET_PARAM(numResSta, 0, configMap, "num_res_sta");
     WHM_MXL_NE_SET_PARAM(managementFramesRate, MGMT_FRAMES_RATE_DEFAULT, configMap, "management_frames_rate");
     WHM_MXL_NE_SET_PARAM(mgmtFramePowerControl, 0, configMap, "mgmt_frame_power_control");
-    /* When we disable one Radio(either 2.4G or 5G)
-    *  the RNR(MXL Properietory one) is getting
-    *  overwritten because of OpenSource
-    *  RNR enabled by default
-    */
     if(wld_ap_getDiscoveryMethod(pAP) == M_AP_DM_RNR) {
         swl_mapCharFmt_addValInt32(configMap, "rnr", 0);
     }

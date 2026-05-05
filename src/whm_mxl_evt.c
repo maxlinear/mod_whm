@@ -23,6 +23,7 @@
 #include "wld/wld_nl80211_api.h"
 #include "wld/wld_nl80211_attr.h"
 #include "wld/wld_nl80211_events.h"
+#include "wld/wld_rad_nl80211.h"
 #include "wld/wld_chanmgt.h"
 #include "wld/wld_util.h"
 
@@ -33,8 +34,13 @@
 #include "whm_mxl_parser.h"
 #include "whm_mxl_monitor.h"
 #include "whm_mxl_evt.h"
+#include "whm_mxl_vap.h"
+#include "whm_mxl_mlo.h"
 
 #define ME "mxlEvt"
+
+#define MLO_GENERIC_STATE_UPDATE_RETRY_MAX 10
+#define MLO_GENERIC_STATE_UPDATE_RETRY_MS 1000
 
 static void s_updateNewChanspec(T_Radio* pRad, swl_chanspec_t* pChanSpec, wld_channelChangeReason_e reason) {
     ASSERTS_NOT_NULL(pRad, , ME, "NULL");
@@ -370,7 +376,7 @@ static swl_rc_ne s_mxl_WpaCustomCtrlEvtMsg(void* userData, char* ifName, char* m
     return rc;
 }
 
-static swl_rc_ne s_mxl_setRadioWpaCtrlEvtHandlers(T_Radio* pRad) {
+static swl_rc_ne s_setRadioWpaCtrlEvtHandlers(T_Radio* pRad) {
     void* userdata = NULL;
     wld_wpaCtrl_radioEvtHandlers_cb handlers = {0};
 
@@ -395,52 +401,199 @@ static swl_rc_ne s_mxl_setRadioWpaCtrlEvtHandlers(T_Radio* pRad) {
     return SWL_RC_OK;
 }
 
-swl_rc_ne whm_mxl_evt_setVendorEvtHandlers(T_Radio* pRad) {
-    ASSERT_NOT_NULL(pRad, SWL_RC_INVALID_PARAM, ME, "pRad NULL");
+/**
+ * @brief Update Vendor MLD State (whm_mxl_mlt_t) to Generic MLD (wld_mld_t).
+ *
+ * @details
+ * Queries the wlan driver for APMLD info, copies mainLink identity, then
+ * updates all generic link data. If the NL80211 query fails, a deferred
+ * retry is scheduled (up to MLO_GENERIC_STATE_UPDATE_RETRY_MAX times at
+ * MLO_GENERIC_STATE_UPDATE_RETRY_MS intervals).
+ *
+ * @note operation is IDEMPOTENT by design
+ *
+ * @param pAP Pointer to the access point structure.
+ */
+static void s_updateGenericAPMLD(T_AccessPoint* pAP) {
+    whm_mxl_mld_t* pMld = whm_mxl_mlo_getMldVap(pAP);
+    ASSERT_NOT_NULL(pMld, , ME, "pMld is NULL");
 
-    /*
-     * set the nl80211 vendor event handler
-     * after nl80211Listener is created (ie when radio wiphyId is known: after successful wrad_support)
-     */
-    if (pRad->nl80211Listener != NULL) {
-        wld_nl80211_addVendorEvtListener(wld_nl80211_getSharedState(), pRad->nl80211Listener, s_vendorEvtCb);
+    whm_mxl_nl80211_apMld_t* pNlApMld = whm_mxl_mlo_getApMldInfo(pMld);
+    if (!pNlApMld) {
+        if (pMld->genericUpdateRetryCtr < MLO_GENERIC_STATE_UPDATE_RETRY_MAX) {
+            pMld->genericUpdateRetryCtr++;
+            SAH_TRACEZ_WARNING(ME, "%s: MLD(%d) NL failed, retry(%u) in %u ms",
+                               pAP->alias, pMld->mloId, pMld->genericUpdateRetryCtr,
+                               MLO_GENERIC_STATE_UPDATE_RETRY_MS);
+            swla_delayExec_addTimeout((swla_delayExecFun_cbf) s_updateGenericAPMLD,
+                                      pAP, MLO_GENERIC_STATE_UPDATE_RETRY_MS);
+        } else {
+            SAH_TRACEZ_ERROR(ME, "%s: MLD(%d) NL query max retries (%u) exhausted",
+                             pAP->alias, pMld->mloId, MLO_GENERIC_STATE_UPDATE_RETRY_MAX);
+        }
+        return;
     }
 
-    s_mxl_setRadioWpaCtrlEvtHandlers(pRad);
+    pMld->genericUpdateRetryCtr = 0;
+    whm_mxl_mlo_copyNl80211ApMldToMld(pMld, pNlApMld);
+    free(pNlApMld);
+    whm_mxl_mlo_updateGenericMld(pMld);
+    SAH_TRACEZ_INFO(ME, "%s: MLD(%d) Updated Generic MLD's", pAP->alias, pMld->mloId);
+}
+
+static void s_newInterfaceCb(void* pRef, void* pData,
+                             wld_nl80211_ifaceInfo_t* pIfaceInfo) {
+    T_Radio* pRad = (T_Radio*) pRef;
+    ASSERT_NOT_NULL(pRad, , ME, "pRad NULL");
+    ASSERT_NOT_NULL(pIfaceInfo, , ME, "pIfaceInfo NULL");
+    mxl_VendorData_t* pRadVendor = mxl_rad_getVendorData(pRad);
+    ASSERT_NOT_NULL(pRadVendor, , ME, "pRadVendor is NULL");
+
+    SWL_CALL(pRadVendor->wldNlHandlers.fNewInterfaceCb, pRef, pData, pIfaceInfo);
+
+    // Custom Vendor NEW_INTERFACE handling below
+    SAH_TRACEZ_INFO(ME, "%s: vendor NEW_INTERFACE handling", pRad->Name);
+
+    T_AccessPoint* pAP = wld_rad_vap_from_name(pRad, pIfaceInfo->name);
+    ASSERT_NOT_NULL(pAP, , ME, "pAP NULL");
+    whm_mxl_mld_t* pMld = whm_mxl_mlo_getMldVap(pAP);
+    if (whm_mxl_mlo_getMldStatus(pMld)) {
+        SAH_TRACEZ_INFO(ME, "%s: deferring generic state update by %u ms",
+                        pIfaceInfo->name, MLO_GENERIC_STATE_UPDATE_RETRY_MS);
+        swla_delayExec_addTimeout((swla_delayExecFun_cbf) s_updateGenericAPMLD,
+                                  pAP, MLO_GENERIC_STATE_UPDATE_RETRY_MS);
+    }
+}
+
+/**
+ * @brief Set NL80211 event handlers for the given radio.
+ *
+ * @note wld_rad_nl80211_setEvtListener() destroys the existing NL80211 listener
+ * and recreates it with the updated handlers. This means any previously registered
+ * vendor event listener is lost and must be re-added after this call.
+ * The caller (whm_mxl_evt_setVendorEvtHandlers) handles this by calling
+ * wld_nl80211_addVendorEvtListener() after s_setRadNl80211EvtHandlers().
+ *
+ * @todo When pWHM makes wld_nl80211_updateEventHandlers() public, switch to that
+ * API to update handlers in-place.
+ *
+ * @param[in] pRad Pointer to the radio structure.
+ * @return swl_rc_ne SWL_RC_OK on success, SWL_RC_ERROR on failure.
+ */
+static swl_rc_ne s_setRadNl80211EvtHandlers(T_Radio* pRad) {
+    ASSERT_NOT_NULL(pRad, SWL_RC_INVALID_PARAM, ME, "pRad NULL");
+    ASSERT_NOT_NULL(pRad->nl80211Listener, SWL_RC_INVALID_PARAM, ME,
+                    "%s: nl80211Listener NULL", pRad->Name);
+
+    wld_nl80211_evtHandlers_cb handlers;
+    memset(&handlers, 0, sizeof(handlers));
+
+    // Get current handlers from the radio's NL80211 listener
+    if (!wld_nl80211_getEvtListenerHandlers(pRad->nl80211Listener, NULL,
+                                            &handlers)) {
+        SAH_TRACEZ_ERROR(ME, "%s: Failed to get NL80211 event handlers",
+                         pRad->Name);
+        return SWL_RC_ERROR;
+    }
+
+    // Store wld's default NL handlers in vendor data before custom overriding
+    mxl_VendorData_t* pRadVendor = mxl_rad_getVendorData(pRad);
+    ASSERT_NOT_NULL(pRadVendor, SWL_RC_ERROR, ME, "%s: pRadVendor is NULL",
+                    pRad->Name);
+    pRadVendor->wldNlHandlers = handlers;
+    handlers.fNewInterfaceCb = s_newInterfaceCb;
+
+    if (wld_rad_nl80211_setEvtListener(pRad, NULL, &handlers) < SWL_RC_OK) {
+        SAH_TRACEZ_ERROR(ME, "%s: Failed to set Radio NL handlers", pRad->Name);
+        return SWL_RC_ERROR;
+    }
+
+    SAH_TRACEZ_INFO(ME, "%s: Radio NL listener updated", pRad->Name);
     return SWL_RC_OK;
 }
 
-static void s_selectLinkIface(void* userData, const char* ifName, char** pPrimLinkIfName) {
+swl_rc_ne whm_mxl_evt_setVendorEvtHandlers(T_Radio* pRad) {
+    ASSERT_NOT_NULL(pRad, SWL_RC_INVALID_PARAM, ME, "pRad NULL");
+
+    s_setRadioWpaCtrlEvtHandlers(pRad);
+
+    // set the nl80211 vendor event handler after nl80211Listener is created
+    // (ie when radio wiphyId is known: after successful wrad_support)
+    if (pRad->nl80211Listener != NULL) {
+        s_setRadNl80211EvtHandlers(pRad);
+        wld_nl80211_addVendorEvtListener(wld_nl80211_getSharedState(),
+                                         pRad->nl80211Listener, s_vendorEvtCb);
+    }
+
+    return SWL_RC_OK;
+}
+
+static void s_apEnabledCb(void* userData, char* ifName) {
+    T_AccessPoint* pAP = (T_AccessPoint*) userData;
+    ASSERT_NOT_NULL(pAP, , ME, "pAP is NULL");
+    mxl_VapVendorData_t* pVapVendor = mxl_vap_getVapVendorData(pAP);
+    ASSERT_NOT_NULL(pVapVendor, , ME, "pVapVendor is NULL");
+
+    SWL_CALL(pVapVendor->wldEvtHandlers.fApEnabledCb, userData, ifName);
+
+    // Custom Vendor AP-ENABLED handling below
+    SAH_TRACEZ_INFO(ME, "%s: vendor AP-ENABLED handling", ifName);
+
+    whm_mxl_mld_t* pMld = whm_mxl_mlo_getMldVap(pAP);
+    if (whm_mxl_mlo_getMldStatus(pMld)) {
+        SAH_TRACEZ_INFO(ME, "%s: deferring generic state update by %u ms",
+                        ifName, MLO_GENERIC_STATE_UPDATE_RETRY_MS);
+        swla_delayExec_addTimeout((swla_delayExecFun_cbf) s_updateGenericAPMLD,
+                                  pAP, MLO_GENERIC_STATE_UPDATE_RETRY_MS);
+    }
+}
+
+static void s_selectPrimLinkIface(void* userData, const char* ifName,
+                                  char** pPrimLinkIfName) {
     ASSERT_NOT_NULL(pPrimLinkIfName, , ME, "NULL");
     swl_str_copyMalloc(pPrimLinkIfName, NULL);
     ASSERT_STR(ifName, , ME, "empty ifname");
     T_AccessPoint* pAP = (T_AccessPoint*) userData;
-    ASSERT_EQUALS(wld_vap_from_name(ifName), pAP, , ME, "vap (%p) ifname (%s) mismatch", pAP, ifName);
-    /* Primary link is always the VAP itself - our MLO has no primary link concept */
+    ASSERT_EQUALS(wld_vap_from_name(ifName), pAP, , ME,
+                  "vap (%p) ifname (%s) mismatch", pAP, ifName);
+
+    // MxL MLO is still a Multi-Wiphy solution, Thus, Primary Link Iface
+    // reported is always the pAP's Interface.
     const char* pLinkIfName = wld_ssid_getIfName(pAP->pSSID);
     ASSERTI_STR(pLinkIfName, , ME, "no prim link iface for iface (%s)", ifName);
-    SAH_TRACEZ_INFO(ME, "Primary link iface (%s) for link (%s)", pLinkIfName, ifName);
+    SAH_TRACEZ_INFO(ME, "Primary link iface (%s) for link (%s)",
+                    pLinkIfName, ifName);
     swl_str_copyMalloc(pPrimLinkIfName, pLinkIfName);
 }
 
 swl_rc_ne whm_mxl_evt_setVapEvtHandlers(T_AccessPoint* pAP) {
     ASSERT_NOT_NULL(pAP, SWL_RC_INVALID_PARAM, ME, "pAP is NULL");
-    ASSERT_NOT_NULL(pAP->wpaCtrlInterface, SWL_RC_INVALID_PARAM, ME, "wpaCtrlIface is NULL");
+    ASSERT_NOT_NULL(pAP->wpaCtrlInterface, SWL_RC_INVALID_PARAM, ME,
+                    "wpaCtrlIface is NULL");
     wld_wpaCtrl_evtHandlers_cb wpaCtrlVapEvtHandlers;
     memset(&wpaCtrlVapEvtHandlers, 0, sizeof(wpaCtrlVapEvtHandlers));
 
-    if (!wld_wpaCtrlInterface_getEvtHandlers(pAP->wpaCtrlInterface, NULL, &wpaCtrlVapEvtHandlers)) {
+    if (!wld_wpaCtrlInterface_getEvtHandlers(pAP->wpaCtrlInterface, NULL,
+                                             &wpaCtrlVapEvtHandlers)) {
         SAH_TRACEZ_ERROR(ME, "%s: Failed to get VAP event handlers", pAP->alias);
         return SWL_RC_ERROR;
     }
 
-    /* Overwrite the default handlers with custom ones */
-    wpaCtrlVapEvtHandlers.fSelectPrimLinkIface = s_selectLinkIface;
+    // Store wld's default WpaCtrl handlers in vendor data before custom overriding
+    mxl_VapVendorData_t* pVapVendor = mxl_vap_getVapVendorData(pAP);
+    ASSERT_NOT_NULL(pVapVendor, SWL_RC_ERROR, ME, "%s: pVapVendor is NULL",
+                    pAP->alias);
+    pVapVendor->wldEvtHandlers = wpaCtrlVapEvtHandlers;
+    wpaCtrlVapEvtHandlers.fApEnabledCb = s_apEnabledCb;
+    wpaCtrlVapEvtHandlers.fSelectPrimLinkIface = s_selectPrimLinkIface;
 
-    if (!wld_wpaCtrlInterface_setEvtHandlers(pAP->wpaCtrlInterface, pAP, &wpaCtrlVapEvtHandlers)) {
-        SAH_TRACEZ_ERROR(ME, "%s: Failed to set VAP event handlers", pAP->alias);
+    if (!wld_wpaCtrlInterface_setEvtHandlers(pAP->wpaCtrlInterface, pAP,
+                                             &wpaCtrlVapEvtHandlers)) {
+        SAH_TRACEZ_ERROR(ME, "%s: Failed to set VAP WpaCtrl handlers", pAP->alias);
         return SWL_RC_ERROR;
     }
+
+    SAH_TRACEZ_INFO(ME, "%s: VAP WpaCtrl Handlers Updated", pAP->alias);
 
     return SWL_RC_OK;
 }

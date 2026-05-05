@@ -15,6 +15,11 @@
                     parameter AcsBootChannel = -1;
                 }
                 parameter ExternalAcsMgmt = false;
+                object Vendor {
+                    object WMMStats {
+                        parameter Enable = true;
+                    }
+                }
             }
 {% if (Radio.OperatingFrequency == "5GHz") : %}
             object '{{Radio.Alias}}' {

@@ -65,9 +65,7 @@ swl_rc_ne whm_mxl_updateOnEventMaxAssociatedDevices(T_AccessPoint* pAP);
 swl_rc_ne whm_mxl_configureSaeExt(T_AccessPoint* pAP);
 swl_rc_ne whm_mxl_toggleWPA3PersonalCompatibility(T_AccessPoint* pAP);
 whm_mxl_config_flow_e whm_mxl_chooseVapConfigFlow(T_AccessPoint* pAP, whm_mxl_config_type_e type);
-#ifdef CONFIG_VENDOR_MXL_PROPRIETARY
 swl_rc_ne whm_mxl_configureBgAcs(T_Radio* pRad, uint16_t bgAcsInterval);
-#endif /* CONFIG_VENDOR_MXL_PROPRIETARY */
 bool whm_mxl_hostapd_sendCommand(T_AccessPoint* pAP, char* cmd, const char* reason);
 bool whm_mxl_wpaCtrl_sendCmdCheckSpecificResponse(T_AccessPoint* pAP, char* cmd, const char* reason, char* expectedResponse);
 

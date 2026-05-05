@@ -34,7 +34,6 @@
 #include "whm_mxl_rad.h"
 #include "whm_mxl_cfgActions.h"
 #include "whm_mxl_hostapd_cfg.h"
-#include "whm_mxl_wmm.h"
 #include "whm_mxl_evt.h"
 #include "whm_mxl_mlo.h"
 #include "whm_mxl_reconfMngr.h"
@@ -92,6 +91,7 @@ static void s_mxl_vap_init_vendordata(T_AccessPoint* pAP) {
     mxlVapVendorData->pLink = NULL;
     mxlVapVendorData->wdsSingleMlAssoc = false;
     mxlVapVendorData->wdsPrimaryLink = false;
+    mxlVapVendorData->wdsForce6GAssoc = false;
 
     /* Init VAP enable sync timer */
     amxp_timer_new(&mxlVapVendorData->onVapEnableSyncTimer, s_enableSync, pAP);
@@ -382,7 +382,8 @@ int whm_mxl_vap_updateApStats(T_AccessPoint* pAP) {
                                          VENDOR_SUBCMD_IS_SYNC, VENDOR_SUBCMD_IS_WITHOUT_ACK, 0, s_getTr181WlanStatsApCb, pAP);
 
     ASSERT_FALSE(rc < SWL_RC_OK, rc, ME, "%s: GET_TR181_WLAN_STATS failed", pAP->alias);
-    rc = mxl_getWmmStats(pAP, &pAP->pSSID->stats, false);
+    rc = whm_mxl_getApWmmStats(pAP, &pAP->pSSID->stats);
+    ASSERT_FALSE(rc < SWL_RC_OK, rc, ME, "%s: Get AP WMM stats failed", pAP->alias);
 
     return rc;
 }
@@ -460,8 +461,15 @@ int whm_mxl_vap_enable(T_AccessPoint* pAP, int enable, int set) {
                 wld_bgdfs_setAvailable(pRad, true);
             }
         }
-        /* When VAP is enabled dynamically - start sync enable timer and set reload pending */
+
         if (!(set & DIRECT)) {
+            if (whm_mxl_mlo_checkMldConfigChange(pAP)) {
+                SAH_TRACEZ_INFO(ME, "%s: Is part of MLD - requesting MLD action", pAP->alias);
+                whm_mxl_mlo_requestMldAction(pAP, true);
+                return ret;
+            }
+            // When VAP is enabled dynamically
+            // start sync enable timer and set reload pending
             s_startSyncOnEnable(pAP);
         }
     }
@@ -483,9 +491,10 @@ int whm_mxl_vap_ssid(T_AccessPoint* pAP, char* buf, int bufsize, int set) {
         strncpy(buf, pSSID->SSID, SWL_MIN(bufsize, MAX_SSID_LEN));
     }
 
-    if ((set & SET) && whm_mxl_mlo_checkMldConfigChange(pAP) && wld_secDmn_isAlive(pRad->hostapd)) {
-        SAH_TRACEZ_INFO(ME, "%s: Is part of MLD - force restart", pAP->alias);
-        return whm_mxl_restartHapd(pAP->pRadio);
+    if ((set & SET) && whm_mxl_mlo_checkMldConfigChange(pAP)) {
+        SAH_TRACEZ_INFO(ME, "%s: Is part of MLD - requesting MLD action", pAP->alias);
+        whm_mxl_mlo_requestMldAction(pAP, false);
+        return SWL_RC_OK;
     }
 
     /* Choose config flow */
@@ -539,9 +548,10 @@ int whm_mxl_vap_sec_sync(T_AccessPoint* pAP, int set) {
     ASSERTI_NOT_NULL(pRad, SWL_RC_INVALID_PARAM, ME, "pRad is NULL");
     int rc = 0;
 
-    if ((set & SET) && whm_mxl_mlo_checkMldConfigChange(pAP) && wld_secDmn_isAlive(pRad->hostapd)) {
-        SAH_TRACEZ_INFO(ME, "%s: Is part of MLD - force restart", pAP->alias);
-        return whm_mxl_restartHapd(pAP->pRadio);
+    if ((set & SET) && whm_mxl_mlo_checkMldConfigChange(pAP)) {
+        SAH_TRACEZ_INFO(ME, "%s: Is part of MLD - requesting MLD action", pAP->alias);
+        whm_mxl_mlo_requestMldAction(pAP, false);
+        return SWL_RC_OK;
     }
 
     if ((set & SET) && (whm_mxl_chooseVapConfigFlow(pAP, WHM_MXL_CONFIG_TYPE_SECURITY) == WHM_MXL_CONFIG_FLOW_RECONF)) {
@@ -1011,8 +1021,8 @@ static void s_setDisableBeaconProtection_pwf(void* priv _UNUSED, amxd_object_t* 
     if (whm_mxl_rad_checkForceEnableBe(pRad)) {
         mxlVapVendorData->disableBeaconProt = disableBeaconProt;
         whm_mxl_updateDisableBeaconProt(pAP);
-        if (wld_secDmn_isAlive(pRad->hostapd) && whm_mxl_mlo_checkMldConfigChange(pAP)) {
-            whm_mxl_restartHapd(pRad);
+        if (whm_mxl_mlo_checkMldConfigChange(pAP)) {
+            whm_mxl_mlo_requestMldAction(pAP, false);
         } else {
             whm_mxl_determineVapParamAction(pAP, amxd_param_get_name(param), (disableBeaconProt ? "1" : "0"));
         }
@@ -1117,9 +1127,9 @@ static void s_setEnableWPA3PersonalCompatibility_pwf(void* priv _UNUSED, amxd_ob
 
     bool EnableWPA3PersonalCompatibility = amxc_var_dyncast(bool, newParamValues);
     mxlVapVendorData->EnableWPA3PersonalCompatibility = EnableWPA3PersonalCompatibility;
-    if (wld_secDmn_isAlive(pRad->hostapd) && whm_mxl_mlo_checkMldConfigChange(pAP)) {
-        SAH_TRACEZ_INFO(ME, "%s: Is part of MLD - force restart", pAP->alias);
-        whm_mxl_restartHapd(pRad);
+    if (whm_mxl_mlo_checkMldConfigChange(pAP)) {
+        SAH_TRACEZ_INFO(ME, "%s: Is part of MLD - requesting MLD action", pAP->alias);
+        whm_mxl_mlo_requestMldAction(pAP, false);
         SAH_TRACEZ_OUT(ME);
         return;
     }
@@ -1481,6 +1491,10 @@ static void s_setMloConfig_ocf(void* priv _UNUSED, amxd_object_t* object,
             bool wdsPrimaryLink = amxc_var_dyncast(bool, newValue);
             vapVendor->wdsPrimaryLink = wdsPrimaryLink;
             whm_mxl_determineVapParamAction(pAP, pname, (wdsPrimaryLink ? "1" : "0"));
+        } else if(swl_str_matches(pname, "WdsForce6GAssoc")) {
+            bool wdsForce6GAssoc = amxc_var_dyncast(bool, newValue);
+            vapVendor->wdsForce6GAssoc = wdsForce6GAssoc;
+            whm_mxl_determineVapParamAction(pAP, pname, (wdsForce6GAssoc ? "1" : "0"));
         } else {
             continue;
         }
@@ -1779,12 +1793,16 @@ swl_rc_ne whm_mxl_vap_postUpActions(T_AccessPoint* pAP) {
         pVapVendorData->vapEnableReloadPending = false;
     }
 
+    whm_mxl_initWmmQueues(pAP);
+
     return SWL_RC_OK;
 }
 
 swl_rc_ne whm_mxl_vap_postDownActions(T_AccessPoint* pAP) {
     ASSERT_NOT_NULL(pAP, SWL_RC_INVALID_PARAM, ME, "NULL");
     /* Add post VAP down actions here */
+    /* PPA/DP will automatically deinitalize the queues - only update status */
+    whm_mxl_wmmUpdateStatus(pAP, MXL_WMM_QUEUES_DISABLED);
     return SWL_RC_OK;
 }
 

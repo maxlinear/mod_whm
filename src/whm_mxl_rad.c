@@ -28,6 +28,7 @@
 #include "wld/wld_linuxIfUtils.h"
 #include "wld/wld_rad_hostapd_api.h"
 #include "wld/wld_eventing.h"
+#include "wld/wld_mld.h"
 
 #include "whm_mxl_module.h"
 #include "whm_mxl_utils.h"
@@ -37,7 +38,6 @@
 #include "whm_mxl_hostapd_cfg.h"
 #include "whm_mxl_cfgActions.h"
 #include "whm_mxl_vap.h"
-#include "whm_mxl_wmm.h"
 #include "whm_mxl_reconfMngr.h"
 
 #include <vendor_cmds_copy.h>
@@ -75,8 +75,12 @@ mxl_VendorData_t* mxl_rad_getVendorData(const T_Radio* pRad) {
 
 static void s_mxl_rad_init_vendordata(T_Radio* pRad) {
     ASSERT_NOT_NULL(pRad, , ME, "NULL");
+    mxl_VendorData_t* pRadVendorData = mxl_rad_getVendorData(pRad);
     whm_mxl_monitor_init(pRad);
     whm_mxl_rad_delVap_timer_init(pRad);
+
+    ASSERT_NOT_NULL(pRadVendorData, , ME, "pRadVendorData is NULL");
+    pRadVendorData->wmmStatsEnable = false;
 }
 
 // TODO: Should be removed once this API is upstreamed
@@ -187,6 +191,28 @@ int whm_mxl_rad_supports(T_Radio* pRad, char* buf _UNUSED, int bufsize _UNUSED) 
         SAH_TRACEZ_INFO(ME, "%s: Set support MBSSID_ADVERTISEMENT_MODE_ON", pRad->Name);
     }
 
+    // Set MLO capabilities
+    if (wld_rad_checkEnabledRadStd(pRad, SWL_RADSTD_BE)) {
+        wld_mldMgr_t* pMldMgr = pRad->vendor ? pRad->vendor->pMldMgr : NULL;
+        if (pMldMgr == NULL) {
+            SAH_TRACEZ_WARNING(ME, "%s: wld MLD manager not available", pRad->Name);
+        } else {
+            wld_mldCapa_t apMldCapa;
+            memset(&apMldCapa, 0, sizeof(apMldCapa));
+            apMldCapa.maxNumMLDs = MAX_MLD_VAPS;
+            apMldCapa.maxNumLinksPerMLD = MAX_MLD_LINKS;
+
+            rc = wld_mld_updateMldCapa(pMldMgr, WLD_SSID_TYPE_AP, &apMldCapa);
+            if (rc >= SWL_RC_OK) {
+                SAH_TRACEZ_INFO(ME, "%s: MLD caps: MaxNumMLDs=%d, MaxNumLinksPerMLD=%d",
+                                pRad->Name, apMldCapa.maxNumMLDs, apMldCapa.maxNumLinksPerMLD);
+            } else {
+                SAH_TRACEZ_WARNING(ME, "%s: Failed to set MLD capabilities, rc=%d",
+                                   pRad->Name, rc);
+            }
+        }
+    }
+
     // set vendor events handler after nl80211Listener is created (ie when radio wiphyId is known: after successful wrad_support)
     SAH_TRACEZ_INFO(ME, "%s: Set vendor event handler", pRad->Name);
     rc = whm_mxl_evt_setVendorEvtHandlers(pRad);
@@ -241,6 +267,10 @@ static bool s_isHapdDisableRequired(chanmgt_rad_state radDetailedState) {
     return ((radDetailedState == CM_RAD_UP) || (radDetailedState == CM_RAD_FG_CAC) || (radDetailedState == CM_RAD_CONFIGURING));
 }
 
+static bool s_isIfaceDisableAllowed(chanmgt_rad_state radDetailedState) {
+    return ((radDetailedState == CM_RAD_UP) || (radDetailedState == CM_RAD_FG_CAC));
+}
+
 static void s_syncOnRadDynamicEnable(T_Radio* pRad) {
     ASSERT_NOT_NULL(pRad, , ME, "NULL");
     bool isHapdReady = wld_secDmn_isRunning(pRad->hostapd) && wld_rad_firstCommitFinished(pRad);
@@ -264,9 +294,11 @@ int whm_mxl_rad_enable(T_Radio* pRad, int val, int set) {
         // let hostapd/wpa_supp manage the main iface enabling
         if(!val) {
             SAH_TRACEZ_INFO(ME, "%s: rad enable %d", pRad->Name, val);
-            wld_linuxIfUtils_setState(wld_rad_getSocket(pRad), pRad->Name, false);
+            rc = whm_mxl_hapd_getRadState(pRad, &radDetState);
+            if (swl_rc_isOk(rc) && s_isIfaceDisableAllowed(radDetState)) {
+                wld_linuxIfUtils_setState(wld_rad_getSocket(pRad), pRad->Name, false);
+            }
             if (wld_secDmn_isRunning(pRad->hostapd)) {
-                rc = whm_mxl_hapd_getRadState(pRad, &radDetState);
                 if (swl_rc_isOk(rc) && s_isHapdDisableRequired(radDetState)) {
                     // explicitly disable hostapd to sync with driver state of the interface
                     wld_rad_hostapd_disable(pRad);
@@ -282,11 +314,9 @@ int whm_mxl_rad_enable(T_Radio* pRad, int val, int set) {
 static void s_deinitRadVendorData(T_Radio* pRad) {
     mxl_VendorData_t* vendorData = mxl_rad_getVendorData(pRad);
     ASSERT_NOT_NULL(vendorData, , ME, "NULL");
-#ifdef CONFIG_VENDOR_MXL_PROPRIETARY
     if (vendorData->acs_exclusion_ch_list) {
         free(vendorData->acs_exclusion_ch_list);
     }
-#endif /* CONFIG_VENDOR_MXL_PROPRIETARY */
     free(vendorData);
 }
 
@@ -469,8 +499,11 @@ int whm_mxl_rad_stats(T_Radio* pRad) {
         rc = wld_ap_nl80211_sendVendorSubCmd(pAP, OUI_MXL, LTQ_NL80211_VENDOR_SUBCMD_GET_TR181_WLAN_STATS, NULL, 0,
                                              VENDOR_SUBCMD_IS_SYNC, VENDOR_SUBCMD_IS_WITHOUT_ACK, 0, s_getVAPStatsCb, &stats);
         ASSERT_FALSE(rc < SWL_RC_OK, rc, ME, "%s: GET_TR181_WLAN_STATS failed", pAP->alias);
-        rc = mxl_getWmmStats(pAP, &stats, true);
-        ASSERT_FALSE(rc < SWL_RC_OK, rc, ME, "%s: Get WMM stats failed", pAP->alias);
+    }
+
+    rc = whm_mxl_getRadWmmStats(pRad, &stats);
+    if (rc < SWL_RC_OK) {
+        SAH_TRACEZ_WARNING(ME, "%s: Get Radio WMM stats failed", pRad->Name);
     }
 
     pRad->stats = stats; /* struct copy */
@@ -643,7 +676,6 @@ amxd_status_t _whm_mxl_rad_validateCcaTh_pvf(amxd_object_t* object,
     return amxd_status_ok;
 }
 
-#ifdef CONFIG_VENDOR_MXL_PROPRIETARY
 amxd_status_t _whm_mxl_rad_validateDfsDebugChan_pvf(amxd_object_t* _UNUSED,
                                                        amxd_param_t* param _UNUSED,
                                                        amxd_action_t reason _UNUSED,
@@ -669,7 +701,6 @@ amxd_status_t _whm_mxl_rad_validateZwdfsDebugChan_pvf(amxd_object_t* _UNUSED,
     }
     return amxd_status_invalid_value;
 }
-#endif /* CONFIG_VENDOR_MXL_PROPRIETARY */
 
 amxd_status_t _whm_mxl_rad_validateFirstNonDfs_pvf(amxd_object_t* object,
                                                        amxd_param_t* param _UNUSED,
@@ -936,7 +967,6 @@ static void s_setCountryThird_pwf(void* priv _UNUSED, amxd_object_t* object, amx
     SAH_TRACEZ_OUT(ME);
 }
 
-#ifdef CONFIG_VENDOR_MXL_PROPRIETARY
 static void s_setDfsDebugChan_pwf(void* priv _UNUSED, amxd_object_t* object, amxd_param_t* param, const amxc_var_t* const newParamValues) {
     SAH_TRACEZ_IN(ME);
     /* WiFi.Radio.{}.Vendor */
@@ -963,7 +993,6 @@ static void s_setZwdfsDebugChan_pwf(void* priv _UNUSED, amxd_object_t* object, a
     SAH_TRACEZ_OUT(ME);
 }
 
-#endif /* CONFIG_VENDOR_MXL_PROPRIETARY */
 
 static void s_setSubBandDFS_pwf(void* priv _UNUSED, amxd_object_t* object, amxd_param_t* param, const amxc_var_t* const newParamValues) {
     SAH_TRACEZ_IN(ME);
@@ -1245,10 +1274,8 @@ SWLA_DM_HDLRS(sRadVendorDmHdlrs,
                   SWLA_DM_PARAM_HDLR("ObssBeaconRssiThreshold", s_setObssBeaconRssiThreshold_pwf),
                   SWLA_DM_PARAM_HDLR("ProbeReqListTimer", s_setProbeReqListTimer_pwf),
                   SWLA_DM_PARAM_HDLR("DfsChStateFile", s_setDfsChStateFile_pwf),
-#ifdef CONFIG_VENDOR_MXL_PROPRIETARY
                   SWLA_DM_PARAM_HDLR("DfsDebugChan", s_setDfsDebugChan_pwf),
                   SWLA_DM_PARAM_HDLR("ZwdfsDebugChan", s_setZwdfsDebugChan_pwf),
-#endif /* CONFIG_VENDOR_MXL_PROPRIETARY */
                   SWLA_DM_PARAM_HDLR("SubBandDFS", s_setSubBandDFS_pwf),
                   SWLA_DM_PARAM_HDLR("Enable80211BeOverride", s_setEnable80211BeOverride_pwf),
                   SWLA_DM_PARAM_HDLR("TwtResponderSupport", s_setTwtResponderSupport_pwf),
@@ -1423,7 +1450,6 @@ void _whm_mxl_rad_setVendorObj_ocf(const char* const sig_name,
     swla_dm_procObjEvtOfLocalDm(&sRadVendorDmHdlrs, sig_name, data, priv);
 }
 
-#ifdef CONFIG_VENDOR_MXL_PROPRIETARY
 amxd_status_t _whm_mxl_rad_validateBgAcsInterval_pvf(amxd_object_t* _UNUSED,
                                                      amxd_param_t* param _UNUSED,
                                                      amxd_action_t reason _UNUSED,
@@ -1514,8 +1540,6 @@ void _whm_mxl_rad_setAcsConf_ocf(const char* const sig_name,
                                   void* const priv) {
     swla_dm_procObjEvtOfLocalDm(&sAcsConfigDmHdlrs, sig_name, data, priv);
 }
-#else
-#endif /* CONFIG_VENDOR_MXL_PROPRIETARY */
 
 static void s_setAfcConfig_ocf(void* priv _UNUSED, amxd_object_t* object, const amxc_var_t* const newParamValues _UNUSED) {
     SAH_TRACEZ_IN(ME);
@@ -1731,7 +1755,6 @@ void _whm_mxl_rad_setDelayedStartConf_ocf(const char* const sig_name,
     swla_dm_procObjEvtOfLocalDm(&sDelayedStartDmHdlrs, sig_name, data, priv);
 }
 
-#ifdef CONFIG_VENDOR_MXL_PROPRIETARY
 #define MAX_ACS_EXCLUSION_LIST_SIZE 2048
 swl_rc_ne whm_mxl_rad_startPltfACS(T_Radio* pRad , const amxc_var_t* const args) {
     SAH_TRACEZ_IN(ME);
@@ -1899,7 +1922,6 @@ void _whm_mxl_rad_updateAcsBootChannel(const char* const sig_name _UNUSED,
     swla_delayExec_addTimeout((swla_delayExecFun_cbf) s_disableAcsBootChannel, pRad, DM_EVENT_HOOK_TIMEOUT_MS);
     SAH_TRACEZ_OUT(ME);
 }
-#endif /* CONFIG_VENDOR_MXL_PROPRIETARY */
 
 swl_rc_ne whm_mxl_rad_setChanspec(T_Radio* pRad, bool direct)
 {
@@ -1924,7 +1946,6 @@ swl_rc_ne whm_mxl_rad_setChanspec(T_Radio* pRad, bool direct)
     if (!direct) 
         goto end;
 
-#ifdef CONFIG_VENDOR_MXL_PROPRIETARY 
     /* Handle manual bandwidth or channel change when ACS enabled */
     if (wld_secDmn_isAlive(pRad->hostapd) && pRad->autoChannelEnable && (pRad->channelChangeReason == CHAN_REASON_MANUAL)) {
         if (pRad->channel != pRad->currentChanspec.chanspec.channel) {
@@ -1947,7 +1968,6 @@ swl_rc_ne whm_mxl_rad_setChanspec(T_Radio* pRad, bool direct)
             return whm_mxl_toggleHapd(pRad);
         }
     }
-#endif /* CONFIG_VENDOR_MXL_PROPRIETARY */
 
 end:
     CALL_NL80211_FTA_RET(rc, mfn_wrad_setChanspec, pRad, direct);

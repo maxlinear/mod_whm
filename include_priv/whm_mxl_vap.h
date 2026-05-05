@@ -12,6 +12,7 @@
 #include "wld/wld.h"
 #include "wld/wld_linuxIfUtils.h"
 #include "whm_mxl_cfgActions.h"
+#include "whm_mxl_wmm.h"
 #include "whm_mxl_mlo.h"
 
 /* General Definitions Section */
@@ -57,14 +58,19 @@ typedef struct {
     /* Enable or Disable ignoring of 11vDiassoc timer */
     bool ignore11vDiassoc;
 
+    /* WMM Queues status */
+    whm_mxl_wmm_status_e mxlWmmQueuesStatus;
+
     /* Pointer to MLD Vap - valid if AP is part of MLD */
     whm_mxl_mld_t *pMld;
     /* Pointer to MLD Link - valid if AP is part of MLD */
     whm_mxl_link_t *pLink;
     /* WDS ML Single Assoc */
     bool wdsSingleMlAssoc;
-    /* WDS Primary Link*/
+    /* WDS Primary Link */
     bool wdsPrimaryLink;
+    /* WDS Force 6G Assoc */
+    bool wdsForce6GAssoc;
 
     /* Setting the QoS Map */
     char QoSMap[70];
@@ -72,6 +78,8 @@ typedef struct {
     uint8_t hiddenSSIDType;
     /* Disable Beacon Protection */
     bool disableBeaconProt;
+    /* Copy of wld's default WPA ctrl event handlers */
+    wld_wpaCtrl_evtHandlers_cb wldEvtHandlers;
 } mxl_VapVendorData_t;
 
 /* Macros Section */

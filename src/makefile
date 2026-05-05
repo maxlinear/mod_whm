@@ -36,11 +36,6 @@ LDFLAGS += -Wl,-rpath,/lib -Wl,-rpath,/usr/lib -Wl,-rpath,/usr/lib/amx/wld
 LDFLAGS += -lsahtrace -lswlc -lwld
 LDFLAGS += -lamxc -lamxm -lamxp -lamxd -lamxb -lamxo
 
-ifneq ($(CONFIG_MXL_WLAN_OSS_BUILD),y)
-CFLAGS += -DCONFIG_VENDOR_MXL_PROPRIETARY
-endif
-
-
 OBJECTS = $(patsubst %.c, %.o, $(wildcard *.c */*.c */*/*.c))
 
 all: $(COMPONENT).so

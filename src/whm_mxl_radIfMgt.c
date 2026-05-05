@@ -327,9 +327,7 @@ SWL_TABLE(sHapdStatesMaps,
               {"DISABLED", CM_RAD_DOWN},
               {"COUNTRY_UPDATE", CM_RAD_CONFIGURING},
               {"ACS", CM_RAD_CONFIGURING},
-#ifdef CONFIG_VENDOR_MXL_PROPRIETARY
               {"ACS_DONE", CM_RAD_CONFIGURING},
-#endif /* CONFIG_VENDOR_MXL_PROPRIETARY */
               {"HT_SCAN", CM_RAD_CONFIGURING},
               {"DFS", CM_RAD_FG_CAC},
               {"ENABLED", CM_RAD_UP},

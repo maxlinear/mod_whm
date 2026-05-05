@@ -198,10 +198,8 @@ bool whm_mxl_module_init(void) {
     fta.mfn_wrad_sensing_csiStats = whm_mxl_rad_sensingCsiStats;
     fta.mfn_wrad_sensing_resetStats = whm_mxl_rad_sensingResetStats;
     fta.mfn_wrad_updateConfigMap = whm_mxl_rad_updateConfigMap;
-#ifdef CONFIG_VENDOR_MXL_PROPRIETARY
     fta.mfn_wrad_autochannelenable = whm_mxl_rad_autoChannelEnable;
     fta.mfn_wrad_startPltfACS = whm_mxl_rad_startPltfACS;
-#endif /* CONFIG_VENDOR_MXL_PROPRIETARY */
     fta.mfn_wrad_setChanspec = whm_mxl_rad_setChanspec;
     fta.mfn_wrad_radio_status = whm_mxl_rad_status;
     fta.mfn_wrad_regdomain = whm_mxl_rad_regDomain;
@@ -238,6 +236,7 @@ bool whm_mxl_module_init(void) {
     fta.mfn_wendpoint_destroy_hook = whm_mxl_ep_destroyHook;
     fta.mfn_wendpoint_stats = whm_mxl_epStats;
     fta.mfn_wendpoint_updateConfigMaps = whm_mxl_ep_updateConfigMaps;
+    fta.mfn_wendpoint_setMldUnit = whm_mxl_mlo_setEndpointMldUnit;
 
     /* load private vendor datamodel extension and config options*/
     swl_rc_ne ret = wld_vendorModule_parseOdl(ODL_MAIN_FILE);

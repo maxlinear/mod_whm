@@ -10,17 +10,18 @@
 #define __WHM_MXL_RAD_H__
 
 #include "wld/wld.h"
+#include "wld/wld_rad_nl80211.h"
+
 #include "whm_mxl_monitor.h"
 #include "whm_mxl_zwdfs.h"
+#include "whm_mxl_wmm.h"
 #include "whm_mxl_reconfFsm.h"
 
 /* General Definitions Section */
 #define CCA_TH_SIZE 5
-#ifdef CONFIG_VENDOR_MXL_PROPRIETARY
 /* BG ACS Interval range in minutes */
 #define MXL_BG_ACS_INTERVAL_MIN 15
 #define MXL_BG_ACS_INTERVAL_MAX 1440
-#endif /* CONFIG_VENDOR_MXL_PROPRIETARY */
 /* Macros Section */
 
 /* Struct Definition Section */
@@ -67,7 +68,12 @@ typedef struct {
     /* delVapTimer retries */
     int delVapTimerRetries;
 
-#ifdef CONFIG_VENDOR_MXL_PROPRIETARY
+    /* WMM Stats Enable */
+    bool wmmStatsEnable;
+
+    /* Copy of wld's default NL handlers */
+    wld_nl80211_evtHandlers_cb wldNlHandlers;
+
     /* BG ACS Interval - saved in minutes */
     uint16_t bgAcsInterval;
 
@@ -77,7 +83,6 @@ typedef struct {
     int AcsFbBw;
     char* acs_exclusion_ch_list;
     uint32_t acs_exclusion_list_count;
-#endif /* CONFIG_VENDOR_MXL_PROPRIETARY */
 } mxl_VendorData_t;
 
 typedef struct {
@@ -120,10 +125,8 @@ int whm_mxl_rad_beamforming(T_Radio* rad, beamforming_type_t type, int val, int 
 swl_rc_ne whm_mxl_rad_startScan(T_Radio* pRadio);
 swl_rc_ne whm_mxl_rad_supvendModesChanged(T_Radio* pRad, T_AccessPoint* pAP, amxd_object_t* object, amxc_var_t* params);
 swl_rc_ne whm_mxl_rad_regDomain(T_Radio* pRad, char* val, int bufsize, int set);
-#ifdef CONFIG_VENDOR_MXL_PROPRIETARY
 int whm_mxl_rad_autoChannelEnable(T_Radio* pRad, int enable, int set);
 swl_rc_ne whm_mxl_rad_startPltfACS(T_Radio* pRad, const amxc_var_t* const args);
-#endif /* CONFIG_VENDOR_MXL_PROPRIETARY */
 swl_rc_ne whm_mxl_rad_setChanspec(T_Radio* pRad, bool direct);
 int8_t *whm_mxl_rad_txPercentToPower(uint8_t percent);
 uint8_t *whm_mxl_rad_txPowerToPercent(int8_t power);

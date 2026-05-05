@@ -937,6 +937,17 @@
                     on action validate call check_range {min = 0, max = 65535};
                 }
                 /**
+                * WMM Statistics object
+                */
+                %persistent object WMMStats {
+                    on event "*" call whm_mxl_rad_setWmmStatsObj_ocf;
+
+                    /* WMM Stats Enable */
+                    %persistent bool Enable {
+                        default false;
+                    }
+                }
+                /**
                  * Debug call for vendor radio
                  */
                 htable debug(%in string op) <!import:${module}:_whm_mxl_rad_debug!>;
@@ -948,6 +959,19 @@
                  * SocketPath : The full socket path
                  */
                 htable getCsiSocketStatus() <!import:${module}:_whm_mxl_csi_getCsiSocketStatus!>;
+
+                /**
+                 * Request WMM Radio statistic and return a map.
+                 * The map contains:
+                 * Status : Indicates whether the statistic request was successful or not.
+                 * Packets sent : per AC.
+                 * Packets failed : per AC.
+                 * Bytes sent per : AC.
+                 * Bytes failed : per AC.
+                 *
+                 * Access Categories are : BE, BK, VI, VO.
+                 */
+                htable getWmmStats() <!import:${module}:_whm_mxl_wmm_getWmmRadStats!>;
             }
         }
     }
@@ -1074,6 +1098,11 @@
 
                     /*wds_primary_link*/
                     %persistent bool WdsPrimaryLink {
+                        default false;
+                    }
+
+                    /*mld_wds_force_6g_assoc*/
+                    %persistent bool WdsForce6GAssoc {
                         default false;
                     }
                 }
@@ -1351,6 +1380,39 @@
                         default 0;
                     }
                 }
+
+                %read-only object WMMStats {
+
+                    /* WMM Status */
+                    %read-only string Status {
+                        on action validate call check_enum ["Disabled","Enabled","Invalid"];
+                        default "Disabled";
+                    }
+                    /** 
+                    *  WMM stats queue
+                    *  Indicates DP(q) for each access category type
+                    *  from parsed mark to queue
+                    */
+                    %read-only object QueueNum {
+                        %volatile %read-only uint32 BE_Q;
+                        %volatile %read-only uint32 BK_Q;
+                        %volatile %read-only uint32 VO_Q;
+                        %volatile %read-only uint32 VI_Q;
+                    }
+                }
+
+                /**
+                 * Request WMM statistic for the AP and return a map.
+                 * The map contains:
+                 * Status : Indicates whether the statistic request was successful or not.
+                 * Packets sent : per AC.
+                 * Packets failed : per AC.
+                 * Bytes sent per : per AC.
+                 * Bytes failed : per AC.
+                 *
+                 * Access Categories are : BE, BK, VI, VO.
+                 */
+                htable getWmmStats() <!import:${module}:_whm_mxl_wmm_getWmmVapStats!>;
             }
         }
     }
@@ -1486,11 +1548,63 @@
                     default 10000;
                 }
             }
+
             /*
-             * Multi-Link.
+             * 802.11 Multi Link Operation
              */
-            %persistent object MLD {
-                list dumpMldAps() <!import:${module}:_whm_mxl_mlo_dumpApMlds!>;
+            %persistent object MLO {
+
+                %persistent %protected object MloCommitManager {
+                    on event "*" call whm_mxl_mlo_commitMngr_configure_ocf;
+
+                    %persistent bool Enable {
+                        default 1;
+                    }
+                    %persistent uint32 CommitDelay {
+                        on action validate call check_range { min = 1000, max = 10000 };
+                        default 5000;
+                    }
+                    %persistent uint32 BootDelay {
+                        on action validate call check_range { min = 1000, max = 30000 };
+                        default 10000;
+                    }
+                }
+
+                list debug() <!import:${module}:_whm_mxl_mlo_debug!>;
+
+                /**
+                 * Get APMLD list from driver via NL80211
+                 *
+                 * Retrieves the list of APMLDs created from the WLAN driver.
+                 *
+                 * Returns a list of APMLD entries with:
+                 * - MldId: MLD Identifier
+                 * - MldAddress: MLD MAC address
+                 * - SSID: SSID of the MLD
+                 * - Links: Array of interface names (links) in the MLD
+                 */
+                list getApMldList() <!import:${module}:_whm_mxl_getApMldList!>;
+
+                /**
+                 * Get STA MLD list from driver via NL80211
+                 *
+                 * Retrieves the list of ML STAs connected to the specified MLD.
+                 * The query is performed on the main link of the MLD.
+                 *
+                 * Arguments:
+                 * - MLDUnit: MLD ID to query (integer >= 0)
+                 *
+                 * Returns a list of STA MLD entries with:
+                 * - MldAddress: MLD MAC address of the STA
+                 * - AID: Association ID
+                 * - LinkType: Link type (e.g., "SingleLink", "DualLink", "TriLink")
+                 * - SupportedMode: Supported MLO mode (e.g., "MLSR", "EMLSR", "STR")
+                 * - Links: Array of link information, each containing:
+                 *   - Ifname: Interface name for this link
+                 *   - StaAddress: Per-link STA MAC address
+                 *   - StationID: Station ID for this link
+                 */
+                list getStaMldList(%in %mandatory int32 MLDUnit) <!import:${module}:_whm_mxl_getStaMldList!>;
             }
         }
     }

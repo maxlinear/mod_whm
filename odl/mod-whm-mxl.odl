@@ -24,7 +24,8 @@
                        "mxlMlo" = 300,
                        "mxlFsm" = 300,
                        "mxlRcfM" = 300,
-                       "mxlLck" = 300
+                       "mxlLck" = 300,
+                       "mxlNlA" = 300
                       };
 
 }

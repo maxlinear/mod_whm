@@ -31,13 +31,13 @@
 {% endif %}
 {% if ( Itf.OperatingFrequency == "6GHz" ) : %}
                 object Security {
-                    parameter ModesAvailable = "WPA3-Personal,OWE";
+                    parameter ModesAvailable = "WPA3-Personal,WPA3-Personal-Compatibility,OWE";
                     parameter SAEPassphrase = "password";
                     parameter MFPConfig = "Required";
                 }
 {% else %}
                 object Security {
-                    parameter ModesAvailable = "None,WPA-WPA2-Personal,WPA2-Personal,WPA3-Personal,WPA2-WPA3-Personal,WPA2-Enterprise,WPA-WPA2-Enterprise,OWE";
+                    parameter ModesAvailable = "None,WPA-WPA2-Personal,WPA2-Personal,WPA3-Personal,WPA3-Personal-Compatibility,WPA2-WPA3-Personal,WPA2-Enterprise,WPA-WPA2-Enterprise,OWE,WPA3-Personal-Transition";
                 }
 
 {% endif %}
