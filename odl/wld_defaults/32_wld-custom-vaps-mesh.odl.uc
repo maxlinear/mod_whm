@@ -21,7 +21,6 @@
 {% endif %}
 {% if ( Itf.OperatingFrequency == "6GHz" ) : %}
                 object Security {
-                    parameter ModesAvailable = "WPA3-Personal,OWE";
                     parameter SAEPassphrase = "password";
                 }
 {% endif %}

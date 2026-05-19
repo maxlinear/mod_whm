@@ -39,6 +39,7 @@
 #include "whm_mxl_cfgActions.h"
 #include "whm_mxl_vap.h"
 #include "whm_mxl_reconfMngr.h"
+#include "whm_mxl_mlo.h"
 
 #include <vendor_cmds_copy.h>
 
@@ -281,33 +282,43 @@ static void s_syncOnRadDynamicEnable(T_Radio* pRad) {
     whm_mxl_rad_requestSync(pRad);
 }
 
-int whm_mxl_rad_enable(T_Radio* pRad, int val, int set) {
+int whm_mxl_rad_enable(T_Radio* pRad, int val, int flag) {
     int ret = val;
-    chanmgt_rad_state radDetState = CM_RAD_UNKNOWN;
-    swl_rc_ne rc;
-    if((set & SET) && !(set & DIRECT)) {
-        if (val) {
-            s_syncOnRadDynamicEnable(pRad);
-        }
-    }
-    if((set & DIRECT) && (set & SET)) {
-        // let hostapd/wpa_supp manage the main iface enabling
-        if(!val) {
-            SAH_TRACEZ_INFO(ME, "%s: rad enable %d", pRad->Name, val);
-            rc = whm_mxl_hapd_getRadState(pRad, &radDetState);
-            if (swl_rc_isOk(rc) && s_isIfaceDisableAllowed(radDetState)) {
-                wld_linuxIfUtils_setState(wld_rad_getSocket(pRad), pRad->Name, false);
+    SAH_TRACEZ_INFO(ME, "%s: rad enable %d -> %d - flag:%d",
+                    pRad->Name, pRad->enable, val, flag);
+    if(flag & SET) {
+        if (flag & DIRECT) {
+            // let hostapd/wpa_supp manage the main iface enabling
+            if(!val) {
+                chanmgt_rad_state radDetState = CM_RAD_UNKNOWN;
+                swl_rc_ne rc = whm_mxl_hapd_getRadState(pRad, &radDetState);
+                if (swl_rc_isOk(rc) && s_isIfaceDisableAllowed(radDetState)) {
+                    wld_linuxIfUtils_setState(wld_rad_getSocket(pRad), pRad->Name, false);
+                }
+                if (wld_secDmn_isRunning(pRad->hostapd)) {
+                    if (swl_rc_isOk(rc) && s_isHapdDisableRequired(radDetState)) {
+                        // explicitly disable hostapd to sync with driver state of the interface
+                        wld_rad_hostapd_disable(pRad);
+                    }
+                }
             }
-            if (wld_secDmn_isRunning(pRad->hostapd)) {
-                if (swl_rc_isOk(rc) && s_isHapdDisableRequired(radDetState)) {
-                    // explicitly disable hostapd to sync with driver state of the interface
-                    wld_rad_hostapd_disable(pRad);
+        } else {
+            T_AccessPoint* pAP = NULL;
+            if (val) {
+                s_syncOnRadDynamicEnable(pRad);
+            }
+            CALL_NL80211_FTA_RET(ret, mfn_wrad_enable, pRad, val, flag);
+            wld_rad_forEachAp(pAP, pRad) {
+                if (whm_mxl_mlo_checkMldConfigChange(pAP)) {
+                    SAH_TRACEZ_INFO(ME, "%s: Is part of MLD - requesting MLD action", pAP->alias);
+                    whm_mxl_mlo_requestMldAction(pAP, true);
                 }
             }
         }
     } else {
-        CALL_NL80211_FTA_RET(ret, mfn_wrad_enable, pRad, val, set);
+        CALL_NL80211_FTA_RET(ret, mfn_wrad_enable, pRad, val, flag);
     }
+
     return ret;
 }
 
@@ -2096,10 +2107,11 @@ swl_rc_ne whm_mxl_rad_supstd(T_Radio* pRad, swl_radioStandard_m radioStandards) 
     CALL_NL80211_FTA_RET(rc, mfn_wrad_supstd, pRad, radioStandards);
     ASSERT_FALSE(rc < SWL_RC_OK, rc, ME, "fail in generic call");
 
+    T_AccessPoint* pAP = NULL;
     if (wld_secDmn_isAlive(pRad->hostapd)) {
         if (wld_rad_is_24ghz(pRad)) {
             amxc_llist_for_each(it, &pRad->llAP) {
-                T_AccessPoint* pAP = amxc_llist_it_get_data(it, T_AccessPoint, it);
+                pAP = amxc_llist_it_get_data(it, T_AccessPoint, it);
                 mxl_VapVendorData_t* mxlVapVendorData = mxl_vap_getVapVendorData(pAP);
                 if ((pAP != NULL) && (mxlVapVendorData != NULL)) {
                     if (whm_mxl_utils_isDummyVap(pAP))
@@ -2113,6 +2125,14 @@ swl_rc_ne whm_mxl_rad_supstd(T_Radio* pRad, swl_radioStandard_m radioStandards) 
             }
         }
     }
+
+    wld_rad_forEachAp(pAP, pRad) {
+        if (whm_mxl_mlo_checkMldConfigChange(pAP)) {
+            SAH_TRACEZ_INFO(ME, "%s: Is part of Inactive AP-MLD - requesting MLD action", pAP->alias);
+            whm_mxl_mlo_requestMldAction(pAP, true);
+        }
+   }
+
     return rc;
 }
 

@@ -26,6 +26,7 @@
 
 #include "whm_mxl_utils.h"
 #include "whm_mxl_nl80211.h"
+#include "whm_mxl_vap.h"
 #include "whm_mxl_mlo.h"
 #include <vendor_cmds_copy.h>
 
@@ -109,6 +110,7 @@ swl_rc_ne whm_mxl_nl80211_getApMldList(
     ASSERT_NOT_NULL(pAp, SWL_RC_INVALID_PARAM, ME, "pAp is NULL");
     ASSERT_NOT_NULL(ppMldList, SWL_RC_INVALID_PARAM, ME, "ppMldList is NULL");
     ASSERT_NOT_NULL(pCount, SWL_RC_INVALID_PARAM, ME, "pCount is NULL");
+    ASSERTI_TRUE(mxl_isApReadyToProcessVendorCmd(pAp), SWL_RC_INVALID_STATE, ME, "AP not ready to process Vendor cmd");
 
     s_nl80211_apMldList_t priv = {
         .pMldList = NULL,
@@ -214,6 +216,7 @@ swl_rc_ne whm_mxl_nl80211_getStaMldList(
     ASSERT_NOT_NULL(pAp, SWL_RC_INVALID_PARAM, ME, "pAp is NULL");
     ASSERT_NOT_NULL(ppStaMldList, SWL_RC_INVALID_PARAM, ME, "ppStaMldList is NULL");
     ASSERT_NOT_NULL(pCount, SWL_RC_INVALID_PARAM, ME, "pCount is NULL");
+    ASSERTI_TRUE(mxl_isApReadyToProcessVendorCmd(pAp), SWL_RC_INVALID_STATE, ME, "AP not ready to process Vendor cmd");
 
     s_nl80211_staMldList_t priv = {
         .pStaMldList = NULL,
