@@ -200,7 +200,7 @@ static whm_mxl_mld_t* s_getMldVap(int32_t mloId) {
     return NULL;
 }
 
-static bool s_checkVendorSecSharedConfig(T_AccessPoint* pAP1, T_AccessPoint* pAP2)
+static bool s_checkVendorSecSharedConfigs(T_AccessPoint* pAP1, T_AccessPoint* pAP2)
 {
     ASSERT_NOT_NULL(pAP1, false, ME, "pAP1 is NULL");
     ASSERT_NOT_NULL(pAP2, false, ME, "pAP2 is NULL");
@@ -219,6 +219,28 @@ static bool s_checkVendorSecSharedConfig(T_AccessPoint* pAP1, T_AccessPoint* pAP
         SAH_TRACEZ_INFO(ME, "MLO: Disable Beacon Protection Mismatch between links (%s: %d & %s: %d)",
                         pAP1->alias, pVapVendorAp1->disableBeaconProt,
                         pAP2->alias, pVapVendorAp2->disableBeaconProt);
+        return false;
+    }
+    return true;
+}
+
+static bool s_checkSharedSSIDConfigs(T_AccessPoint* pAP1, T_AccessPoint* pAP2)
+{
+    ASSERT_NOT_NULL(pAP1, false, ME, "pAP1 is NULL");
+    ASSERT_NOT_NULL(pAP2, false, ME, "pAP2 is NULL");
+    T_SSID* pSSID1 = pAP1->pSSID;
+    ASSERT_NOT_NULL(pSSID1, false, ME, "pSSID1 is NULL");
+    T_SSID* pSSID2 = pAP2->pSSID;
+    ASSERT_NOT_NULL(pSSID2, false, ME, "pSSID2 is NULL");
+
+    if (!swl_str_matches(pSSID1->SSID, pSSID2->SSID)) {
+        SAH_TRACEZ_INFO(ME, "MLO: SSID mismatch between links (%s & %s)",
+                        pAP1->alias, pAP2->alias);
+        return false;
+    }
+    if (pAP1->SSIDAdvertisementEnabled != pAP2->SSIDAdvertisementEnabled) {
+        SAH_TRACEZ_INFO(ME, "MLO: Hidden SSID mismatch between links (%s & %s)",
+                        pAP1->alias, pAP2->alias);
         return false;
     }
     return true;
@@ -280,8 +302,8 @@ whm_mxl_mld_unusable_reason_m whm_mxl_mlo_checkMldUsability(whm_mxl_mld_t* pMld)
         if (pLink != pRefLink) {
             T_AccessPoint* pRefAP = pRefLink->pLinkAp;
             T_SSID* pRefSSID = pRefLink->pLinkSSID;
-            if (!swl_str_matches(pRefSSID->SSID, pCurSSID->SSID)) {
-                SAH_TRACEZ_INFO(ME, "MLO: SSID mismatch between links (%s & %s)",
+            if (!s_checkSharedSSIDConfigs(pRefAP, pCurAP)) {
+                SAH_TRACEZ_INFO(ME, "MLO: SSID configuration mismatch between links (%s & %s)",
                                 pRefSSID->SSID, pCurSSID->SSID);
                 W_SWL_BIT_SET(reasons, MLD_UNUSABLE_SSID_MISMATCH);
             }
@@ -290,7 +312,7 @@ whm_mxl_mld_unusable_reason_m whm_mxl_mlo_checkMldUsability(whm_mxl_mld_t* pMld)
                                 pRefAP->alias, pCurAP->alias);
                 W_SWL_BIT_SET(reasons, MLD_UNUSABLE_SHARED_SEC_MISMATCH);
             }
-            if (!s_checkVendorSecSharedConfig(pRefAP, pCurAP)) {
+            if (!s_checkVendorSecSharedConfigs(pRefAP, pCurAP)) {
                 SAH_TRACEZ_INFO(ME, "MLO: Vendor security mismatch between links (%s & %s)",
                                 pRefAP->alias, pCurAP->alias);
                 W_SWL_BIT_SET(reasons, MLD_UNUSABLE_SHARED_SEC_MISMATCH);
