@@ -81,6 +81,7 @@ bool whm_mxl_utils_isAnyApActive(T_Radio* pRad);
 bool whm_mxl_utils_hasDisabledVap(T_Radio* pRad);
 int whm_mxl_utils_getNumOfVaps(T_Radio* pRad);
 T_AccessPoint* whm_mxl_utils_getFirstEnabledVap(T_Radio* pRad);
+T_AccessPoint* whm_mxl_utils_getFirstVapRefEnabled(T_Radio* pRad);
 T_AccessPoint* whm_mxl_utils_getMasterVap(T_Radio* pRad);
 uint32_t whm_mxl_utils_numOfGrpMembers(T_Radio* pRad);
 bool whm_mxl_isChannelWidthEqual(swl_chanspec_t chspec, swl_bandwidth_e chW);

@@ -17,6 +17,7 @@
 #include "wld/wld.h"
 #include "wld/wld_util.h"
 #include "wld/wld_radio.h"
+#include "wld/wld_accesspoint.h"
 #include "wld/wld_chanmgt.h"
 #include "wld/wld_secDmn.h"
 #include "wld/wld_secDmnGrp.h"
@@ -220,6 +221,27 @@ T_AccessPoint* whm_mxl_utils_getFirstEnabledVap(T_Radio* pRad) {
             if (pAP->enable && (pAP->status == APSTI_ENABLED)) {
                 return pAP;
             }
+        }
+    }
+    return NULL;
+}
+
+/**
+ * @brief Get the first enabled AP with enabled reference on the radio
+ *        (excluding dummy VAP)
+ * 
+ * @param pRad Radio
+ * @return pAP Return AP context.
+ */
+T_AccessPoint* whm_mxl_utils_getFirstVapRefEnabled(T_Radio* pRad) {
+    ASSERT_NOT_NULL(pRad, NULL, ME, "pRad is NULL");
+    T_AccessPoint* pAP = NULL;
+    wld_rad_forEachAp(pAP, pRad) {
+        if (whm_mxl_utils_isDummyVap(pAP)) {
+            continue;
+        }
+        if (pAP && pAP->enable && wld_ap_isEnabledWithRef(pAP)) {
+            return pAP;
         }
     }
     return NULL;

@@ -4,7 +4,7 @@
             object Daemon {
                 instance add ("hostapd", Name = "hostapd") {
                     object ExecOptions {
-                        parameter LogOutputPath = "Stdout";
+                        parameter LogOutputPath = "Syslog";
                         parameter LogDebugLevel = "Info";
                     }
                 }

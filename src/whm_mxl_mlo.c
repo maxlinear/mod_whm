@@ -133,6 +133,39 @@ static void s_setCommitMngrDefaults(whm_mxl_mld_mngr_t* pMldMngr) {
     pMldMngr->mloCommitMngr.bootDelay = MLO_COMMIT_BOOT_DELAY_DEFAULT_MS;
 }
 
+whm_mxl_mld_t* whm_mxl_mlo_getMldByMac(swl_macBin_t* mac) {
+    whm_mxl_mld_mngr_t* pMldMngr = whm_mxl_mlo_get_mldMngr();
+    ASSERT_NOT_NULL(pMldMngr, NULL, ME, "NULL");
+    whm_mxl_mld_t *pMld = NULL;
+
+    whm_mxl_mlo_forEachMldVap(pMld, pMldMngr) {
+        if (SWL_MAC_BIN_MATCHES(&pMld->apMldMac, mac))
+            return pMld;
+    }
+    return NULL;
+}
+
+whm_mxl_link_t* whm_mxl_mlo_getLinkByMac(whm_mxl_mld_t *pMld, swl_macBin_t* mac) {
+    ASSERT_NOT_NULL(pMld, NULL, ME, "NULL");
+    whm_mxl_link_t* pLink = NULL;
+    whm_mxl_mlo_forEachLinkInMld(pLink, pMld) {
+        T_SSID* pSSID = pLink->pLinkSSID;
+        if (pSSID && SWL_MAC_BIN_MATCHES(pSSID->MACAddress, mac))
+            return pLink;
+    }
+    return NULL;
+}
+
+whm_mxl_link_t* whm_mxl_mlo_getLinkByLinkId(whm_mxl_mld_t *pMld, uint32_t linkId) {
+    ASSERT_NOT_NULL(pMld, NULL, ME, "NULL");
+    whm_mxl_link_t* pLink = NULL;
+    whm_mxl_mlo_forEachLinkInMld(pLink, pMld) {
+        if (pLink->linkId == linkId)
+            return pLink;
+    }
+    return NULL;
+}
+
 whm_mxl_mld_t* whm_mxl_mlo_getMldVap(T_AccessPoint* pAP) {
     mxl_VapVendorData_t* pVapVendor = mxl_vap_getVapVendorData(pAP);
     ASSERT_NOT_NULL(pVapVendor, NULL, ME, "VapVendorData is NULL");
@@ -209,16 +242,25 @@ static bool s_checkVendorSecSharedConfigs(T_AccessPoint* pAP1, T_AccessPoint* pA
     mxl_VapVendorData_t* pVapVendorAp2 = mxl_vap_getVapVendorData(pAP2);
     ASSERT_NOT_NULL(pVapVendorAp2, false, ME, "pVapVendorAp2 is NULL");
 
-    if (pVapVendorAp1->EnableWPA3PersonalCompatibility != pVapVendorAp2->EnableWPA3PersonalCompatibility) {
-        SAH_TRACEZ_INFO(ME, "MLO: WPA3 Personal Compatibility Mismatch between links (%s: %d & %s: %d)",
-                        pAP1->alias, pVapVendorAp1->EnableWPA3PersonalCompatibility,
-                        pAP2->alias, pVapVendorAp2->EnableWPA3PersonalCompatibility);
+    /* Mandate WPA3-PCM mode consistency between links */
+    bool isPcm1 = (pAP1->secModeEnabled == SWL_SECURITY_APMODE_WPA3_P_CM);
+    bool isPcm2 = (pAP2->secModeEnabled == SWL_SECURITY_APMODE_WPA3_P_CM);
+    if (isPcm1 != isPcm2) {
+        SAH_TRACEZ_INFO(ME, "MLO: WPA3-PCM mode not shared between links (%s: %s & %s: %s)",
+                        pAP1->alias, isPcm1 ? "PCM" : "non-PCM",
+                        pAP2->alias, isPcm2 ? "PCM" : "non-PCM");
         return false;
     }
     if (pVapVendorAp1->disableBeaconProt != pVapVendorAp2->disableBeaconProt) {
         SAH_TRACEZ_INFO(ME, "MLO: Disable Beacon Protection Mismatch between links (%s: %d & %s: %d)",
                         pAP1->alias, pVapVendorAp1->disableBeaconProt,
                         pAP2->alias, pVapVendorAp2->disableBeaconProt);
+        return false;
+    }
+    if (pAP1->rekeyingInterval != pAP2->rekeyingInterval) {
+        SAH_TRACEZ_INFO(ME, "MLO: wpa_group_rekey Mismatch between links (%s: %d & %s: %d)",
+                        pAP1->alias, pAP1->rekeyingInterval,
+                        pAP2->alias, pAP2->rekeyingInterval);
         return false;
     }
     return true;
@@ -246,11 +288,17 @@ static bool s_checkSharedSSIDConfigs(T_AccessPoint* pAP1, T_AccessPoint* pAP2)
     return true;
 }
 
+static bool s_isValidMldType(whm_mxl_mld_type_e mldType) {
+    return (mldType == MLD_TYPE_SINGLE_LINK) ||
+           (mldType == MLD_TYPE_DUAL_LINK)   ||
+           (mldType == MLD_TYPE_TRI_LINK);
+}
+
 /**
  * @brief Evaluate MLD usability without modifying any stored state.
  *
  * Checks all conditions that determine whether an MLD can operate:
- *   - MLD type must be DUAL_LINK or TRI_LINK (not SINGLE_LINK or NONE)
+ *   - MLD type must be SINGLE_LINK, DUAL_LINK, or TRI_LINK (not NONE)
  *   - AP MLD MAC must be set (non-null)
  *   - All affiliated links must be enabled
  *   - All affiliated links must be operating in 802.11 BE mode
@@ -267,7 +315,7 @@ whm_mxl_mld_unusable_reason_m whm_mxl_mlo_checkMldUsability(whm_mxl_mld_t* pMld)
     ASSERT_NOT_NULL(pMld, M_MLD_UNUSABLE_INTERNAL_ERROR, ME, "pMld is NULL");
     whm_mxl_mld_unusable_reason_m reasons = MLD_UNUSABLE_NONE;
 
-    if (pMld->mldType == MLD_TYPE_NONE || pMld->mldType == MLD_TYPE_SINGLE_LINK) {
+    if (!s_isValidMldType(pMld->mldType)) {
         SAH_TRACEZ_INFO(ME, "MLO: MLD(%d) with Invalid Type %d",
                         pMld->mloId, pMld->mldType);
         W_SWL_BIT_SET(reasons, MLD_UNUSABLE_INVALID_TYPE);
@@ -428,6 +476,21 @@ void whm_mxl_mlo_requestMldAction(T_AccessPoint* pAP, bool forceAction) {
     s_mloStartCommit();
 }
 
+/**
+ * @brief Refresh MLD usability and trigger a direct commit.
+ *
+ * Internal helper used by MLD create/delete paths.
+ * Always updates stored usability state and schedules a commit
+ *
+ * @param[in] pMld         MLD object
+ */
+static void s_requestMldAction(whm_mxl_mld_t* pMld) {
+    ASSERT_NOT_NULL(pMld, , ME, "pMld is NULL");
+    whm_mxl_mlo_updateMldStatus(pMld);
+    SAH_TRACEZ_INFO(ME, "MLO: MLD(%d) direct commit", pMld->mloId);
+    s_mloStartCommit();
+}
+
 amxd_object_t* whm_mxl_mlo_getMloObject(T_AccessPoint* pAP) {
     ASSERT_NOT_NULL(pAP, NULL, ME, "pAP is NULL");
     amxd_object_t* pVendorObj = amxd_object_get(pAP->pBus, "Vendor");
@@ -572,7 +635,8 @@ static swl_rc_ne s_createLink(T_AccessPoint* pAP, whm_mxl_mld_t* pMld) {
         amxd_object_set_cstring_t(pMlObj, "ApMldMac", mldMac.cMac);
     }
 
-    whm_mxl_mlo_requestMldAction(pAP, true);
+    /* Evaluate MLD usability and commit to apply changes */
+    s_requestMldAction(pMld);
 
     return SWL_RC_OK;
 }
@@ -592,17 +656,6 @@ static swl_rc_ne s_deleteLink(T_AccessPoint* pAP) {
     ASSERTI_NOT_NULL(pMld, SWL_RC_ERROR, ME, "No MLD VAP associated with pAP %s", pAP->alias);
     whm_mxl_link_t* pLink = pVendor->pLink;
     ASSERTI_NOT_NULL(pLink, SWL_RC_ERROR, ME, "No MLD Link associated with pAP %s", pAP->alias);
-
-    // Find a sibling link BEFORE freeing this link
-    whm_mxl_link_t* pSiblingLink = NULL;
-    whm_mxl_link_t* pIter = NULL;
-    whm_mxl_mlo_forEachLinkInMld(pIter, pMld) {
-        if (pIter != pLink) {
-            pSiblingLink = pIter;
-            break;
-        }
-    }
-    T_AccessPoint* pSiblingAP = pSiblingLink ? pSiblingLink->pLinkAp : NULL;
 
     // Clear ApMldMac if was created from one of the links MAC
     if (!pMld->externalMldMac) {
@@ -626,17 +679,13 @@ static swl_rc_ne s_deleteLink(T_AccessPoint* pAP) {
 
     s_setMldType(pMld);
 
-    // If last link in MLD VAP - delete MLD VAP
+    /* Re-evaluate MLD usability and commit to apply changes */
+    s_requestMldAction(pMld);
+
+    /* If last link in MLD VAP - delete MLD VAP */
     if (amxc_llist_is_empty(&pMld->affiliatedLinks)) {
         SAH_TRACEZ_INFO(ME, "MLO: Last link removed - deleting MLD VAP with MLO ID (%d)", pMld->mloId);
         s_deleteMldVap(pMld);
-        // No sibling exists, no action needed
-        return SWL_RC_OK;
-    }
-
-    // Request MLD action on sibling to re-evaluate MLD usability
-    if (pSiblingAP) {
-        whm_mxl_mlo_requestMldAction(pSiblingAP, true);
     }
 
     return SWL_RC_OK;
@@ -1039,51 +1088,6 @@ whm_mxl_nl80211_apMld_t* whm_mxl_mlo_getApMldInfo(whm_mxl_mld_t* pMld) {
 }
 
 /**
- * @brief Copy NL80211 AP MLD data into Vendor MLD
- *
- * @param[in,out] pMld     Pointer to mod_whm MLD structure
- * @param[in]     pMldInfo Pointer to NL80211 AP MLD entry from driver
- * @return SWL_RC_OK on success, error code otherwise
- */
-swl_rc_ne whm_mxl_mlo_copyNl80211ApMldToMld(whm_mxl_mld_t* pMld,
-                                             whm_mxl_nl80211_apMld_t* pMldInfo) {
-    ASSERT_NOT_NULL(pMld, SWL_RC_INVALID_PARAM, ME, "pMld is NULL");
-    ASSERT_NOT_NULL(pMldInfo, SWL_RC_INVALID_PARAM, ME, "pMldInfo is NULL");
-
-    /* Determine main link: link whose BSSID matches the AP MLD MAC address */
-    whm_mxl_link_t* pMainLink = NULL;
-    whm_mxl_link_t* pLink = NULL;
-    whm_mxl_mlo_forEachLinkInMld(pLink, pMld) {
-        T_SSID* pSSID = pLink->pLinkSSID;
-        ASSERT_NOT_NULL(pSSID, SWL_RC_ERROR, ME, "pSSID is NULL");
-        if (memcmp(pSSID->BSSID, pMldInfo->mld_addr, SWL_MAC_BIN_LEN) == 0) {
-            pMainLink = pLink;
-            break;
-        }
-    }
-
-    if (!pMainLink) {
-        SAH_TRACEZ_WARNING(ME, "MLD(%d) No link found with " SWL_MAC_FMT " MAC",
-                           pMld->mloId, SWL_MAC_ARG(pMldInfo->mld_addr));
-        /* Fallback: use first interface in AP MLD data */
-        const char* mainIfName = (pMldInfo->ifname[0][0] != '\0')
-                                 ? (const char*)pMldInfo->ifname[0] : NULL;
-        ASSERT_NOT_NULL(mainIfName, SWL_RC_ERROR, ME, "MLD(%d) mainIfName is NULL",
-                        pMld->mloId);
-        pMainLink = whm_mxl_mlo_getMldLink(wld_vap_from_name(mainIfName));
-
-    }
-    ASSERT_NOT_NULL(pMainLink, SWL_RC_ERROR, ME,
-                    "MLD(%d) pMainLink not resolved", pMld->mloId);
-
-    pMld->mainLink = pMainLink;
-    SAH_TRACEZ_INFO(ME, "MLD(%d) Main Link set to linkId=%u",
-                    pMld->mloId, pMainLink->linkId);
-
-    return SWL_RC_OK;
-}
-
-/**
  * @brief Update Generic MLD (wld_mld_t) using Vendor MLD (whm_mxl_mlt_t)
  *
  * Iterates all links in the given Vendor MLD and it sets (in order):
@@ -1097,7 +1101,7 @@ swl_rc_ne whm_mxl_mlo_copyNl80211ApMldToMld(whm_mxl_mld_t* pMld,
  * @param[in] pMld Pointer to mod_whm MLD structure (must have mainLink set)
  * @return SWL_RC_OK on success, error code otherwise
  */
-swl_rc_ne whm_mxl_mlo_updateGenericMld(whm_mxl_mld_t* pMld) {
+static swl_rc_ne s_updateGenericMld(whm_mxl_mld_t* pMld) {
     ASSERT_NOT_NULL(pMld, SWL_RC_INVALID_PARAM, ME, "pMld is NULL");
     ASSERT_NOT_NULL(pMld->mainLink, SWL_RC_INVALID_PARAM, ME,
                     "MLD(%d) mainlink not set", pMld->mloId);
@@ -1114,11 +1118,72 @@ swl_rc_ne whm_mxl_mlo_updateGenericMld(whm_mxl_mld_t* pMld) {
                               : SWL_MLO_ROLE_AUXILIARY;
         wld_ssid_setMLDRole(pSSID, role);
         wld_mld_setLinkConfigured(pSSID->pMldLink, true);
+        /* Must be called to sync MLD status with generic DM */
+        wld_ssid_setMLDStatus(pSSID, wld_mld_checkMLDStatus(pSSID));
         SAH_TRACEZ_INFO(ME, "MLD(%d) %s: set pWHM LinkID=%u, MLDRole=%s, link configured",
                         pMld->mloId, pSSID->Name, pLink->linkId,
                         (role == SWL_MLO_ROLE_PRIMARY) ? "Primary" : "Auxiliary");
     }
 
+    return SWL_RC_OK;
+}
+
+static whm_mxl_link_t* s_setMainLink(T_Radio* pRad, whm_mxl_mld_t* pMld) {
+    ASSERT_NOT_NULL(pRad, NULL, ME, "pRad is NULL");
+    ASSERT_NOT_NULL(pMld, NULL, ME, "pMld is NULL");
+    whm_mxl_link_t* pFirstLink = whm_mxl_mlo_getFirstLink(pMld);
+    ASSERT_NOT_NULL(pFirstLink, NULL, ME, "MLD(%d) has no links", pMld->mloId);
+    whm_mxl_link_t* pMainLink = NULL;
+
+    pMainLink = whm_mxl_mlo_getLinkByMac(pMld, &pMld->apMldMac);
+    if (!pMainLink) {
+        /*  If main link not found by MLD MAC, set main link by the link that matches the radio
+            which triggered the event */
+        whm_mxl_link_t* pLink = NULL;
+        T_AccessPoint* pLinkAp = NULL;
+        whm_mxl_mlo_forEachLinkInMld(pLink, pMld) {
+            pLinkAp = pLink->pLinkAp;
+            if (pLinkAp && (pLinkAp->pRadio == pRad)) {
+                pMainLink = pLink;
+                break;
+            }
+        }
+    }
+    if (!pMainLink) {
+        SAH_TRACEZ_NOTICE(ME, "%s: MLD(%d) main link not found - using first link", pRad->Name, pMld->mloId);
+        pMainLink = pFirstLink;
+    }
+
+    return pMainLink;
+}
+
+swl_rc_ne whm_mxl_mlo_newMldVapEvt(T_Radio* pRad, swl_macBin_t* mac, uint32_t numLinks) {
+    ASSERT_NOT_NULL(pRad, SWL_RC_INVALID_PARAM, ME, "pRad is NULL");
+    whm_mxl_mld_t* pMld = whm_mxl_mlo_getMldByMac(mac);
+    ASSERT_NOT_NULL(pMld, SWL_RC_ERROR, ME, "pMld is NULL");
+
+    ASSERTI_EQUALS(s_getMldVapLinkCount(pMld), numLinks, SWL_RC_ERROR, ME, "MLD(%d) number of links mismatch", pMld->mloId);
+    whm_mxl_link_t* pFirstLink = whm_mxl_mlo_getFirstLink(pMld);
+    ASSERT_NOT_NULL(pFirstLink, SWL_RC_ERROR, ME, "MLD(%d) has no links", pMld->mloId);
+
+    pMld->mainLink = s_setMainLink(pRad, pMld);
+    s_updateGenericMld(pMld);
+    SAH_TRACEZ_INFO(ME, "MLD(%d) Updated Generic MLD's", pMld->mloId);
+    return SWL_RC_OK;
+}
+
+swl_rc_ne whm_mxl_mlo_delMldVapEvt(T_Radio* pRad, swl_macBin_t* mac) {
+    ASSERT_NOT_NULL(pRad, SWL_RC_ERROR, ME, "pRad is NULL");
+    whm_mxl_mld_t* pMld = whm_mxl_mlo_getMldByMac(mac);
+    ASSERT_NOT_NULL(pMld, SWL_RC_ERROR, ME, "pMld is NULL");
+    whm_mxl_link_t* pLink = NULL;
+
+    whm_mxl_mlo_forEachLinkInMld(pLink, pMld) {
+        T_SSID* pSSID = pLink->pLinkSSID;
+        if (pSSID && pSSID->pMldLink) {
+            wld_mld_setLinkConfigured(pSSID->pMldLink, false);
+        }
+    }
     return SWL_RC_OK;
 }
 

@@ -32,6 +32,7 @@
 #include "whm_mxl_rad.h"
 #include "whm_mxl_csi.h"
 #include "whm_mxl_monitor.h"
+#include "whm_mxl_mlo.h"
 #include <vendor_cmds_copy.h>
 
 #define ME "mxlPars"
@@ -149,5 +150,46 @@ swl_rc_ne mxl_parseWiphyInfo(swl_rc_ne rc, struct nlmsghdr* nlh, void* priv) {
     // parse DFS antenna vendor attribute
     s_parseWiphyDfsAntenna(tb, vendorInfo);
 
+    return SWL_RC_OK;
+}
+
+swl_rc_ne mxl_parseNewMldVapEvt(T_Radio* pRad, struct nlattr* tb[]) {
+    ASSERT_NOT_NULL(pRad, SWL_RC_INVALID_PARAM, ME, "NULL");
+    ASSERT_NOT_NULL(tb, SWL_RC_INVALID_PARAM, ME, "NULL");
+    void* data = NULL;
+    size_t len;
+    ASSERT_NOT_NULL(tb[NL80211_ATTR_VENDOR_DATA], SWL_RC_ERROR, ME, "NULL");
+    data = nla_data(tb[NL80211_ATTR_VENDOR_DATA]);
+    data = nla_data(tb[NL80211_ATTR_VENDOR_DATA]);
+    ASSERT_NOT_NULL(data, SWL_RC_ERROR, ME, "data is NULL");
+    struct mxl_new_mld_vap* pNewMlVap = (struct mxl_new_mld_vap*) data;
+    ASSERT_NOT_NULL(pNewMlVap, SWL_RC_ERROR, ME, "NULL");
+    len = nla_len(tb[NL80211_ATTR_VENDOR_DATA]);
+    ASSERT_EQUALS(sizeof(*pNewMlVap), len, SWL_RC_ERROR, ME, "Wrong data size %zu received, expected %zu", len, sizeof(*pNewMlVap));
+    SAH_TRACEZ_INFO(ME, "%s: NEW_MLD_VAP event received for MLD MAC %02x:%02x:%02x:%02x:%02x:%02x, num_of_links %d", pRad->Name,
+                    pNewMlVap->mld_addr[0], pNewMlVap->mld_addr[1], pNewMlVap->mld_addr[2],
+                    pNewMlVap->mld_addr[3], pNewMlVap->mld_addr[4], pNewMlVap->mld_addr[5],
+                    pNewMlVap->num_of_links);
+    whm_mxl_mlo_newMldVapEvt(pRad, (swl_macBin_t*) pNewMlVap->mld_addr, pNewMlVap->num_of_links);
+    return SWL_RC_OK;
+}
+
+swl_rc_ne mxl_parseDelMldVapEvt(T_Radio* pRad, struct nlattr* tb[]) {
+    ASSERT_NOT_NULL(pRad, SWL_RC_INVALID_PARAM, ME, "NULL");
+    ASSERT_NOT_NULL(tb, SWL_RC_INVALID_PARAM, ME, "NULL");
+    void* data = NULL;
+    size_t len;
+    ASSERT_NOT_NULL(tb[NL80211_ATTR_VENDOR_DATA], SWL_RC_ERROR, ME, "NULL");
+    data = nla_data(tb[NL80211_ATTR_VENDOR_DATA]);
+    data = nla_data(tb[NL80211_ATTR_VENDOR_DATA]);
+    ASSERT_NOT_NULL(data, SWL_RC_ERROR, ME, "data is NULL");
+    struct mxl_del_mld_vap* pDelMlVap = (struct mxl_del_mld_vap*) data;
+    ASSERT_NOT_NULL(pDelMlVap, SWL_RC_ERROR, ME, "NULL");
+    len = nla_len(tb[NL80211_ATTR_VENDOR_DATA]);
+    ASSERT_EQUALS(sizeof(*pDelMlVap), len, SWL_RC_ERROR, ME, "Wrong data size %zu received, expected %zu", len, sizeof(*pDelMlVap));
+    SAH_TRACEZ_INFO(ME, "%s: DEL_MLD_VAP event received for MLD MAC %02x:%02x:%02x:%02x:%02x:%02x", pRad->Name,
+                    pDelMlVap->mld_addr[0], pDelMlVap->mld_addr[1], pDelMlVap->mld_addr[2],
+                    pDelMlVap->mld_addr[3], pDelMlVap->mld_addr[4], pDelMlVap->mld_addr[5]);
+    whm_mxl_mlo_delMldVapEvt(pRad, (swl_macBin_t*) pDelMlVap->mld_addr);
     return SWL_RC_OK;
 }

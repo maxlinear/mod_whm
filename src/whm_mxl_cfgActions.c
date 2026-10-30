@@ -114,7 +114,6 @@ SWL_TABLE(sVendorParamsOdlToConf,
           ARR(//Convert ODL name to HAPD conf name
               //Radio Parameters
               {"ApMaxNumSta",                   "ap_max_num_sta"},
-              {"OverrideMBSSID",                "override_6g_mbssid_default_mode"},
               {"SetProbeReqCltMode",            "sProbeReqCltMode"},
               {"SetBfMode",                     "sBfMode"},
               {"SetPowerSelection",             "sPowerSelection"},
@@ -144,12 +143,15 @@ SWL_TABLE(sVendorParamsOdlToConf,
               {"AcsFallbackChan",               "acs_fallback_chan"},
               {"AcsScanMode",                   "acs_scan_mode"},
               {"AcsUpdateDoSwitch",             "acs_update_do_switch"},
+              {"AcsUse24Overlapped",            "acs_use24overlapped"},
               {"AcsFils",                       "acs_fils"},
               {"Acs6gOptChList",                "acs_6g_opt_ch_list"},
               {"AcsStrictChList",               "acs_strict_chanlist"},
               {"Acs6gPunctMode",                "acs_6g_punct_mode"},
               {"AcsBgScanInterval",             "acs_bgscan_interval"},
               {"AcsChanList",                   "chanlist"},
+              {"AcsBootupNonDfs",               "acs_bootup_non_dfs"},
+              {"AcsBootupNonDfsAllowExclusion", "acs_bootup_non_dfs_allow_exclusion"},
               {"BackgroundCac",                 "background_cac"},
               {"StartAfter",                    "start_after"},
               {"StartAfterDelay",               "start_after_delay"},
@@ -414,11 +416,14 @@ SWL_TABLE(sRadCfgParamsActionMap,
               {"AcsFallbackChan",               HAPD_ACTION_NEED_RESTART},
               {"AcsScanMode",                   HAPD_ACTION_NEED_RESTART},
               {"AcsUpdateDoSwitch",             HAPD_ACTION_NEED_RESTART},
+              {"AcsUse24Overlapped",            HAPD_ACTION_NEED_RESTART},
               {"AcsFils",                       HAPD_ACTION_NEED_RESTART},
               {"Acs6gOptChList",                HAPD_ACTION_NEED_RESTART},
               {"AcsStrictChList",               HAPD_ACTION_NEED_RESTART},
               {"Acs6gPunctMode",                HAPD_ACTION_NEED_RESTART},
               {"AcsChanList",                   HAPD_ACTION_NEED_RESTART},
+              {"AcsBootupNonDfs",               HAPD_ACTION_NEED_RESTART},
+              {"AcsBootupNonDfsAllowExclusion", HAPD_ACTION_NEED_RESTART},
               {"AfcdSock",                      HAPD_ACTION_NEED_RESTART},
               {"AfcOpClass",                    HAPD_ACTION_NEED_RESTART},
               {"AfcFrequencyRange",             HAPD_ACTION_NEED_RESTART},
@@ -429,7 +434,6 @@ SWL_TABLE(sRadCfgParamsActionMap,
               {"AfcRequestId",                  HAPD_ACTION_NEED_RESTART},
               {"AfcRequestVersion",             HAPD_ACTION_NEED_RESTART},
               //Actions applied with hostapd toggle
-              {"OverrideMBSSID",                HAPD_ACTION_NEED_TOGGLE},
               {"ApMaxNumSta",                   HAPD_ACTION_NEED_TOGGLE},
               {"SetProbeReqCltMode",            HAPD_ACTION_NEED_TOGGLE},
               {"SetBfMode",                     HAPD_ACTION_NEED_TOGGLE},
@@ -1108,23 +1112,6 @@ swl_rc_ne whm_mxl_updateMultiAp(T_AccessPoint* pAP) {
     return SWL_RC_OK;
 }
 
-swl_rc_ne whm_mxl_handleMbssidOverride(T_Radio* pRad, bool overideMbssid) {
-    ASSERT_NOT_NULL(pRad, SWL_RC_INVALID_PARAM, ME, "pRad is NULL");
-    ASSERT_FALSE((pRad->status == RST_ERROR) || (pRad->status == RST_UNKNOWN), SWL_RC_OK, ME, "%s: Invalid radio state(%d)", pRad->Name, pRad->status);
-    T_AccessPoint* masterVap = wld_rad_getFirstVap(pRad);
-    ASSERT_NOT_NULL(masterVap, SWL_RC_INVALID_PARAM, ME, "masterVap is NULL");
-    if ((pRad->status == RST_ERROR) || (pRad->status == RST_UNKNOWN)) {
-        return SWL_RC_OK;
-    }
-    if (wld_wpaCtrlInterface_isReady(masterVap->wpaCtrlInterface)) {
-        wld_ap_hostapd_setParamValue(masterVap, "override_6g_mbssid_default_mode", (overideMbssid ? "1" : "0"), "override 6G mbssid");
-        /* Reset multibss_enable in hostapd after setting/resetting 6G mbssid override and let hostapd manage */
-        wld_ap_hostapd_setParamValue(masterVap, "multibss_enable", "0", "disable multibss");
-    }
-    whm_mxl_toggleHapd(pRad);
-    return SWL_RC_OK;
-}
-
 swl_rc_ne whm_mxl_updateDisableBeaconProt(T_AccessPoint* pAP) {
     ASSERT_NOT_NULL(pAP, SWL_RC_INVALID_PARAM, ME, "pAP is NULL");
     mxl_VapVendorData_t* mxlVapVendorData = mxl_vap_getVapVendorData(pAP);
@@ -1133,8 +1120,8 @@ swl_rc_ne whm_mxl_updateDisableBeaconProt(T_AccessPoint* pAP) {
     bool disableBeaconProt = mxlVapVendorData->disableBeaconProt;
     T_AccessPoint* otherAp;
 
-    /* Update same value of disableBeaconProt for all 6GHz VAPs due to MBSSID */
-    if (wld_rad_is_6ghz(pRad)) {
+    /* disableBeaconProt must be same in all VAPs in MBSSID */
+    if (wld_rad_hasMbssidAds(pRad)) {
         wld_rad_forEachAp(otherAp, pRad) {
             amxd_object_t* pVendorObj = NULL;
             mxl_VapVendorData_t* pVendorAp = mxl_vap_getVapVendorData(otherAp);
@@ -1150,10 +1137,26 @@ swl_rc_ne whm_mxl_updateDisableBeaconProt(T_AccessPoint* pAP) {
             if (pVendorObj) {
                 amxd_object_set_value(bool, pVendorObj, "DisableBeaconProtection", disableBeaconProt);
             }
+            /* Re-evaluate MLD for other VAPs in Radio */
+            if (whm_mxl_mlo_checkMldConfigChange(otherAp)) {
+                whm_mxl_mlo_requestMldAction(otherAp, false);
+            }
             SAH_TRACEZ_INFO(ME, "%s: Update disable beacon protection to %d", otherAp->alias, disableBeaconProt);
         }
     }
 
+    return SWL_RC_OK;
+}
+
+swl_rc_ne whm_mxl_setRadMiscParams(T_Radio* pRad) {
+    ASSERT_NOT_NULL(pRad, SWL_RC_INVALID_PARAM, ME, "pRad is NULL");
+    T_AccessPoint* masterVap = wld_rad_getFirstVap(pRad);
+    ASSERT_NOT_NULL(masterVap, SWL_RC_INVALID_PARAM, ME, "masterVap is NULL");
+    if (wld_rad_is_6ghz(pRad)) {
+        bool mbssidEnable = wld_rad_hasMbssidAds(pRad);
+        wld_ap_hostapd_setParamValue(masterVap, "override_6g_mbssid_default_mode", (mbssidEnable ? "0" : "1"), "override 6G mbssid");
+        wld_ap_hostapd_setParamValue(masterVap, "multibss_enable", mbssidEnable ? "1" : "0", "update multibss");
+    }
     return SWL_RC_OK;
 }
 
@@ -1168,26 +1171,6 @@ swl_rc_ne whm_mxl_configureSaeExt(T_AccessPoint* pAP) {
 
     whm_mxl_set_vendorMultipleParams(pAP, secApParams, SWL_ARRAY_SIZE(secApParams));
     whm_mxl_toggleHapd(pRad);
-    return SWL_RC_OK;
-}
-
-swl_rc_ne whm_mxl_toggleWPA3PersonalCompatibility(T_AccessPoint* pAP) {
-    ASSERT_NOT_NULL(pAP, SWL_RC_INVALID_PARAM, ME, "No pAP Mapped");
-    T_Radio* pRad = pAP->pRadio;
-    ASSERT_NOT_NULL(pRad, SWL_RC_INVALID_PARAM, ME, "No Radio Mapped");
-    ASSERT_FALSE((pRad->status == RST_ERROR) || (pRad->status == RST_UNKNOWN), SWL_RC_INVALID_STATE, ME, "%s: Invalid radio state(%d)", pRad->Name, pRad->status);
-    ASSERTI_TRUE(wld_secDmn_isAlive(pRad->hostapd), SWL_RC_ERROR, ME, "hostapd not active");
-
-    const char* secApParams[] = {
-        "wpa", "wpa_key_mgmt", "wpa_pairwise", "rsn_pairwise", "group_cipher",
-        "ieee80211w", "sae_pwe", "sae_require_mfp",
-        "rsn_override_mfp", "rsn_override_mfp_2", "rsn_override_omit_rsnxe",
-        "rsn_override_key_mgmt_2", "rsn_override_key_mgmt",
-        "rsn_override_pairwise_2", "rsn_override_pairwise"
-    };
-
-    whm_mxl_set_vendorMultipleParams(pAP, secApParams, SWL_ARRAY_SIZE(secApParams));
-    whm_mxl_sighupHapd(pRad);
     return SWL_RC_OK;
 }
 

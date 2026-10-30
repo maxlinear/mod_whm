@@ -71,6 +71,8 @@
 #define M_HOSTAPD_MULTI_AP_FBSS     0x2
 #define M_HOSTAPD_MULTI_AP_HYBRID   0x3
 
+#define MBSS_NON_TX_BSS_DTIM_PERIOD 1
+
 #define MXL_HAPD_6GHZ_PSD_20MHZ_MIN         (-127)    /* -63.5 dBm in 0.5dB steps */
 #define MXL_HAPD_6GHZ_PSD_20MHZ_MAX         (126)     /* 63 dBm in 0.5dB steps */
 #define MXL_HAPD_6GHZ_10LOG_20MHZ           (13)      /* 10log(20) */

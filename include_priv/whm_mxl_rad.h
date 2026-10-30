@@ -77,6 +77,12 @@ typedef struct {
     /* BG ACS Interval - saved in minutes */
     uint16_t bgAcsInterval;
 
+    /* Initial 5G ACS picks non-DFS channel, then re-evaluates after timer. */
+    bool acsBootupNonDfs;
+
+    /* Same bootup non-DFS behavior with exclusion-list support. */
+    bool acsBootupNonDfsAllowExclusion;
+
     /* ACS FallBack params */
     int AcsFbPrimChan;
     int AcsFbSecChan;
@@ -110,6 +116,7 @@ int whm_mxl_rad_supports(T_Radio* pRad, char* buf _UNUSED, int bufsize _UNUSED);
 int whm_mxl_rad_createHook(T_Radio* pRad);
 void whm_mxl_rad_destroyHook(T_Radio* pRad);
 int whm_mxl_rad_enable(T_Radio* pRad, int val, int flag);
+int whm_mxl_rad_sync(T_Radio* pRad, int set);
 
 int whm_mxl_rad_addVapExt(T_Radio* pRad, T_AccessPoint* pAP);
 int whm_mxl_rad_delVapIf(T_Radio* pRad, char* vapName);
@@ -131,7 +138,7 @@ swl_rc_ne whm_mxl_rad_setChanspec(T_Radio* pRad, bool direct);
 int8_t *whm_mxl_rad_txPercentToPower(uint8_t percent);
 uint8_t *whm_mxl_rad_txPowerToPercent(int8_t power);
 int whm_mxl_rad_status(T_Radio* pRad);
-swl_rc_ne whm_mxl_rad_supstd(T_Radio* pRad, swl_radioStandard_m radioStandards);
+int whm_mxl_rad_supstd(T_Radio* pRad, swl_radioStandard_m radioStandards);
 swl_rc_ne whm_mxl_getBgScanParams(T_Radio* pRad, mxl_bgScanParams_t *pBgScanParams);
 swl_rc_ne whm_mxl_setBgScanParams(T_Radio* pRad, mxl_bgScanParams_t *pBgScanParams);
 swl_rc_ne whm_mxl_hapd_getRadState(T_Radio* pRad, chanmgt_rad_state* pDetailedState);

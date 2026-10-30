@@ -67,6 +67,7 @@ static swl_rc_ne whm_mxl_rad_acsUpdateConfigMap(T_Radio* pRad, mxl_VendorData_t*
     swl_mapCharFmt_addValInt32(configMap, "acs_num_scans", 1);
     swl_mapCharFmt_addValInt32(configMap, "acs_scan_mode", amxd_object_get_value(bool, acsObj, "AcsScanMode", NULL));
     swl_mapCharFmt_addValInt32(configMap, "acs_update_do_switch", amxd_object_get_value(bool, acsObj, "AcsUpdateDoSwitch", NULL));
+    swl_mapCharFmt_addValInt32(configMap, "acs_use24overlapped", amxd_object_get_value(bool, acsObj, "AcsUse24Overlapped", NULL));
 
     acsFallbackChan = amxd_object_get_value(cstring_t, acsObj, "AcsFallbackChan", NULL);
     if (!swl_str_isEmpty(acsFallbackChan)) {
@@ -718,7 +719,6 @@ static swl_rc_ne s_mxl_rad_updateConfig(T_Radio* pRad, mxl_VendorData_t* pRadVen
     int bfMode = amxd_object_get_value(int32_t, pVendorObj, "SetBfMode", NULL);
     bool heDebugMode = amxd_object_get_value(bool, pVendorObj, "HeDebugMode", NULL);
     bool heBeacon = amxd_object_get_value(bool, pVendorObj, "HeBeacon", NULL);
-    bool disableMbssid = amxd_object_get_value(bool, pVendorObj, "OverrideMBSSID", NULL);
     bool duplicateBeacon = amxd_object_get_value(bool, pVendorObj, "DuplicateBeaconEnabled", NULL);
     bool backgroundCac = amxd_object_get_value(bool, pVendorObj, "BackgroundCac", NULL);
     uint32_t duplicateBeaconBw = amxd_object_get_value(uint32_t, pVendorObj, "DuplicateBeaconBw", NULL);
@@ -741,6 +741,7 @@ static swl_rc_ne s_mxl_rad_updateConfig(T_Radio* pRad, mxl_VendorData_t* pRadVen
 
     /* 6G Band Only Parameters */
     if(wld_rad_is_6ghz(pRad)) {
+        bool mbssidEnable = wld_rad_hasMbssidAds(pRad);
         /* Prepare hostapd_conf AFC parameters */
         whm_mxl_rad_afcUpdateConfigMap(pVendorObj, configMap);
         /*
@@ -750,7 +751,9 @@ static swl_rc_ne s_mxl_rad_updateConfig(T_Radio* pRad, mxl_VendorData_t* pRadVen
         */
         whm_mxl_rad_configHe6gCapabs(pVendorObj, configMap);
 
-        WHM_MXL_NE_SET_PARAM(disableMbssid, 0, configMap, "override_6g_mbssid_default_mode");
+        if (!mbssidEnable) {
+            swl_mapCharFmt_addValInt32(configMap, "override_6g_mbssid_default_mode", 1);
+        }
         WHM_MXL_NE_SET_PARAM(heBeacon, 0, configMap, "he_beacon");
         WHM_MXL_NE_SET_PARAM(duplicateBeacon, 0, configMap, "duplicate_beacon_enabled");
         if(duplicateBeacon) {
@@ -874,6 +877,12 @@ static swl_rc_ne s_mxl_rad_updateConfig(T_Radio* pRad, mxl_VendorData_t* pRadVen
         if (pRadVendor->bgAcsInterval) {
             /* Set bg acs interval in minutes */
             swl_mapCharFmt_addValInt32(configMap, "acs_bgscan_interval", pRadVendor->bgAcsInterval);
+        }
+        if (wld_rad_is_5ghz(pRad) && pRadVendor->acsBootupNonDfs) {
+            swl_mapCharFmt_addValInt32(configMap, "acs_bootup_non_dfs", 1);
+        }
+        if (wld_rad_is_5ghz(pRad) && pRadVendor->acsBootupNonDfsAllowExclusion) {
+            swl_mapCharFmt_addValInt32(configMap, "acs_bootup_non_dfs_allow_exclusion", 1);
         }
     } else if (pRadVendor->firstNonDfs) {
         SAH_TRACEZ_INFO(ME, "%s first_non_dfs : %d", pRad->Name, pRadVendor->firstNonDfs);
@@ -1019,10 +1028,12 @@ static void whm_mxl_vap_softBlockConfig(T_AccessPoint* pAP, amxd_object_t* pVend
 static void s_whm_mxl_vap_securityConfig(T_AccessPoint* pAP, swl_mapChar_t* configMap) {
     SAH_TRACEZ_IN(ME);
     mxl_VapVendorData_t* mxlVapVendorData = mxl_vap_getVapVendorData(pAP);
+    ASSERTS_NOT_NULL(mxlVapVendorData, , ME, "mxlVapVendorData is NULL");
     bool forceEnableBe = whm_mxl_rad_checkForceEnableBe(pAP->pRadio);
     swl_security_mfpMode_e mfp = swl_security_getTargetMfpMode(pAP->secModeEnabled, pAP->mfpConfig);
 
     switch(pAP->secModeEnabled) {
+        case SWL_SECURITY_APMODE_WPA3_P_TM:
         case SWL_SECURITY_APMODE_WPA2_WPA3_P:
             if(forceEnableBe) {
                 swl_mapCharFmt_addValStr(configMap, "wpa_key_mgmt", "%s%s%s",
@@ -1127,48 +1138,6 @@ static void s_whm_mxl_vap_securityConfig(T_AccessPoint* pAP, swl_mapChar_t* conf
             }
         default:
             break;
-    }
-
-    // Set Security mode as WPA3 Personal Compatibility
-    if (mxlVapVendorData->EnableWPA3PersonalCompatibility == true) {
-        // Restore parameters from VAP data.
-        swl_mapCharFmt_addValInt32(configMap, "wpa_group_rekey", pAP->rekeyingInterval);
-        swl_mapCharFmt_addValStr(configMap, "wpa_ptk_rekey", "%s", "0");
-        swl_mapCharFmt_addValStr(configMap, "wpa_passphrase", "%s", pAP->keyPassPhrase);
-        if(!swl_str_isEmpty(pAP->saePassphrase)) {
-            swl_mapCharFmt_addValStr(configMap, "sae_password", "%s", pAP->saePassphrase);
-        }
-
-        // Set common defaults
-        swl_mapCharFmt_addValStr(configMap, "wpa", "%s", "2");
-        swl_mapCharFmt_addValStr(configMap, "wpa_pairwise", "%s", "CCMP");
-        swl_mapCharFmt_addValStr(configMap, "rsn_pairwise", "%s", "CCMP");
-        swl_mapCharFmt_addValStr(configMap, "group_cipher", "%s", "CCMP");
-        swl_mapCharFmt_addValStr(configMap, "sae_pwe", "%s", "1");
-        swl_mapCharFmt_addValStr(configMap, "sae_require_mfp", "%s", "1");
-        if (wld_rad_checkEnabledRadStd(pAP->pRadio, SWL_RADSTD_BE)) {
-            swl_mapCharFmt_addValStr(configMap, "rsn_override_pairwise_2", "%s", "GCMP-256");
-            swl_mapCharFmt_addValStr(configMap, "rsn_override_key_mgmt_2", "%s", "SAE-EXT-KEY");
-            swl_mapCharFmt_addValStr(configMap, "rsn_override_mfp_2", "%s", "2");
-        }
-
-        // Set band specific defaults
-        if (pAP->pRadio->operatingFrequencyBand == SWL_FREQ_BAND_EXT_2_4GHZ ||
-            pAP->pRadio->operatingFrequencyBand == SWL_FREQ_BAND_EXT_5GHZ) {
-
-            if(pAP->mfpConfig == SWL_SECURITY_MFPMODE_DISABLED) {
-                mfp = (pAP->mboEnable ? SWL_SECURITY_MFPMODE_OPTIONAL : SWL_SECURITY_MFPMODE_DISABLED);
-            }
-            swl_mapCharFmt_addValStr(configMap, "wpa_key_mgmt", "%s", "WPA-PSK");
-            swl_mapCharFmt_addValInt32(configMap, "ieee80211w", mfp);
-            swl_mapCharFmt_addValStr(configMap, "rsn_override_key_mgmt", "%s", "SAE");
-            swl_mapCharFmt_addValStr(configMap, "rsn_override_pairwise", "%s", "CCMP");
-            swl_mapCharFmt_addValStr(configMap, "rsn_override_mfp", "%s", "2");
-            swl_mapCharFmt_addValStr(configMap, "rsn_override_omit_rsnxe", "%s", "1");
-        } else if (pAP->pRadio->operatingFrequencyBand == SWL_FREQ_BAND_EXT_6GHZ) {
-            swl_mapCharFmt_addValStr(configMap, "wpa_key_mgmt", "%s", "SAE");
-            swl_mapCharFmt_addValStr(configMap, "ieee80211w", "%s", "2");
-        }
     }
 
     SAH_TRACEZ_OUT(ME);
@@ -1296,6 +1265,9 @@ static swl_rc_ne s_mxl_vap_updateConfig(T_AccessPoint* pAP, swl_mapChar_t* confi
     WHM_MXL_GT_SET_PARAM(numResSta, 0, configMap, "num_res_sta");
     WHM_MXL_NE_SET_PARAM(managementFramesRate, MGMT_FRAMES_RATE_DEFAULT, configMap, "management_frames_rate");
     WHM_MXL_NE_SET_PARAM(mgmtFramePowerControl, 0, configMap, "mgmt_frame_power_control");
+    if (wld_rad_hasMbssidAds(pRad) && (whm_mxl_vap_getMbssApType(pAP) == MXL_MBSS_TYPE_NON_TX_BSS)) {
+        swl_mapCharFmt_addValInt32(configMap, "dtim_period", MBSS_NON_TX_BSS_DTIM_PERIOD);
+    }
     if(wld_ap_getDiscoveryMethod(pAP) == M_AP_DM_RNR) {
         swl_mapCharFmt_addValInt32(configMap, "rnr", 0);
     }

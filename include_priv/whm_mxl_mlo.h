@@ -129,13 +129,16 @@ swl_rc_ne whm_mxl_mlo_configureMldMac(T_AccessPoint* pAP, swl_macBin_t* pMldMac,
 swl_rc_ne whm_mxl_mlo_setMldUnit(T_AccessPoint* pAP);
 swl_rc_ne whm_mxl_mlo_setEndpointMldUnit(T_EndPoint* pEP);
 swl_rc_ne whm_mxl_mlo_deleteLink(T_AccessPoint* pAP);
+whm_mxl_mld_t* whm_mxl_mlo_getMldByMac(swl_macBin_t* mac);
 whm_mxl_mld_t* whm_mxl_mlo_getMldVap(T_AccessPoint* pAP);
 whm_mxl_link_t* whm_mxl_mlo_getMldLink(T_AccessPoint* pAP);
+whm_mxl_link_t* whm_mxl_mlo_getLinkByMac(whm_mxl_mld_t *pMld, swl_macBin_t* mac);
+whm_mxl_link_t* whm_mxl_mlo_getLinkByLinkId(whm_mxl_mld_t *pMld, uint32_t linkId);
 whm_mxl_mld_mngr_t *whm_mxl_mlo_get_mldMngr(void);
 swl_rc_ne whm_mxl_mlo_initMld(void);
 swl_rc_ne whm_mxl_mlo_deinitMld(void);
 whm_mxl_nl80211_apMld_t* whm_mxl_mlo_getApMldInfo(whm_mxl_mld_t* pMld);
-swl_rc_ne whm_mxl_mlo_copyNl80211ApMldToMld(whm_mxl_mld_t* pMld, whm_mxl_nl80211_apMld_t* pMldInfo);
-swl_rc_ne whm_mxl_mlo_updateGenericMld(whm_mxl_mld_t* pMld);
+swl_rc_ne whm_mxl_mlo_newMldVapEvt(T_Radio* pRad, swl_macBin_t* mac, uint32_t numLinks);
+swl_rc_ne whm_mxl_mlo_delMldVapEvt(T_Radio* pRad, swl_macBin_t* mac);
 
 #endif /* __WHM_MXL_MLO_H__ */

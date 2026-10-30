@@ -24,6 +24,13 @@ typedef enum {
     MXL_MAP_TYPE_MAX
 } whm_mxl_multi_ap_type_e;
 
+typedef enum {
+    MXL_MBSS_TYPE_NONE = 0,
+    MXL_MBSS_TYPE_TX_BSS = 1,
+    MXL_MBSS_TYPE_NON_TX_BSS = 2,
+    MXL_MBSS_TYPE_MAX
+} whm_mxl_mbss_type_e;
+
 typedef struct {
     /* MxL Multi AP Type */
     whm_mxl_multi_ap_type_e mxlMultiApType;
@@ -39,8 +46,6 @@ typedef struct {
     char OWETransBSSID[ETHER_ADDR_STR_LEN];
     /* To Configure AKM24 type SAE-EXT-KEY */
     bool saeExtKey;
-    /* Flag to indicate WPA3 Personal Compatibility Mode */
-    bool EnableWPA3PersonalCompatibility;
     /*Set Aggr config */
     char AggrConfig[MAX_NUM_OF_DIGITS];
     /* Setting the Management Group Cipher */
@@ -111,5 +116,6 @@ swl_rc_ne whm_mxl_vap_postDownActions(T_AccessPoint* pAP);
 void whm_mxl_registerToWdsEvent(void);
 void whm_mxl_unregisterToWdsEvent(void);
 swl_rc_ne whm_mxl_vap_wpaKeyMgmt (T_AccessPoint* pAP, const char* paramValue);
+whm_mxl_mbss_type_e whm_mxl_vap_getMbssApType(T_AccessPoint* pAP);
 
 #endif /* __WHM_MXL_VAP_H__ */

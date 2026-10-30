@@ -187,7 +187,7 @@ int whm_mxl_rad_supports(T_Radio* pRad, char* buf _UNUSED, int bufsize _UNUSED) 
      *  so we will directly mark that we support MBSSID so that the generic MBSSID handling can be used
      *  i.e. deleting conf section of disabled VAPs when MBSSID is enabled on that radio
      */
-    if (wld_rad_checkEnabledRadStd(pRad, SWL_RADSTD_AX)) {
+    if (wld_rad_is_6ghz(pRad) && SWL_BIT_IS_SET(pRad->supportedStandards, SWL_RADSTD_AX)) {
         W_SWL_BIT_SET(pRad->suppMbssidAdsModes, MBSSID_ADVERTISEMENT_MODE_ON);
         SAH_TRACEZ_INFO(ME, "%s: Set support MBSSID_ADVERTISEMENT_MODE_ON", pRad->Name);
     }
@@ -301,6 +301,8 @@ int whm_mxl_rad_enable(T_Radio* pRad, int val, int flag) {
                         wld_rad_hostapd_disable(pRad);
                     }
                 }
+            } else {
+                wld_linuxIfUtils_setState(wld_rad_getSocket(pRad), pRad->Name, true);
             }
         } else {
             T_AccessPoint* pAP = NULL;
@@ -319,6 +321,17 @@ int whm_mxl_rad_enable(T_Radio* pRad, int val, int flag) {
         CALL_NL80211_FTA_RET(ret, mfn_wrad_enable, pRad, val, flag);
     }
 
+    return ret;
+}
+
+int whm_mxl_rad_sync(T_Radio* pRad, int set) {
+    int ret = 0;
+    CALL_NL80211_FTA_RET(ret, mfn_wrad_sync, pRad, set);
+    if ((set & SET) && (set & DIRECT)) {
+        if(wld_wpaCtrlMngr_isReady(wld_secDmn_getWpaCtrlMgr(pRad->hostapd))) {
+            whm_mxl_setRadMiscParams(pRad);
+        }
+    }
     return ret;
 }
 
@@ -503,7 +516,6 @@ int whm_mxl_rad_stats(T_Radio* pRad) {
     amxc_llist_for_each(it, &pRad->llAP) {
         T_AccessPoint* pAP = (T_AccessPoint*) amxc_llist_it_get_data(it, T_AccessPoint, it);
 
-        SAH_TRACEZ_INFO(ME, "Radio AP interface = %s", pAP->alias);
         if ((pAP->index <= 0) || !mxl_isApReadyToProcessVendorCmd(pAP))
             continue;
 
@@ -861,25 +873,6 @@ static void s_setCcaTh_pwf(void* priv _UNUSED, amxd_object_t* object, amxd_param
     wld_rad_nl80211_sendVendorSubCmd(pRad, OUI_MXL, subcmd, (char*) pRadVendor->ccaTh, sizeof(pRadVendor->ccaTh),
                                      VENDOR_SUBCMD_IS_SYNC, VENDOR_SUBCMD_IS_WITHOUT_ACK, 0, NULL, NULL);
 
-    SAH_TRACEZ_OUT(ME);
-}
-
-static void s_setOverrideMBSSID_pwf(void* priv _UNUSED, amxd_object_t* object, amxd_param_t* param _UNUSED, const amxc_var_t* const newValue) {
-    SAH_TRACEZ_IN(ME);
-    /* WiFi.Radio.{}.Vendor */ 
-    amxd_object_t* radObj = amxd_object_get_parent(object); 
-    T_Radio* pRad = wld_rad_fromObj(radObj);
-    ASSERT_NOT_NULL(pRad, , ME, "No Radio Mapped");
-    bool overrideMbssidNewVal = amxc_var_dyncast(bool, newValue);
-
-    /* Sync only the 6G band */
-    if(wld_rad_is_6ghz(pRad)) {
-        SAH_TRACEZ_INFO(ME, "%s: 6GHz MBSSID Override is set to %d", pRad->Name, overrideMbssidNewVal);
-        whm_mxl_handleMbssidOverride(pRad, overrideMbssidNewVal);
-    } else {
-        SAH_TRACEZ_INFO(ME, "%s: Parameter is not relevant for this radio, configuration will not be applied", pRad->Name);
-    } 
-    
     SAH_TRACEZ_OUT(ME);
 }
 
@@ -1276,8 +1269,7 @@ swl_rc_ne whm_mxl_rad_startScan(T_Radio* pRadio) {
 }
 
 SWLA_DM_HDLRS(sRadVendorDmHdlrs,
-              ARR(SWLA_DM_PARAM_HDLR("OverrideMBSSID", s_setOverrideMBSSID_pwf),
-                  SWLA_DM_PARAM_HDLR("ApMaxNumSta", s_setApMaxNumSta_pwf),
+              ARR(SWLA_DM_PARAM_HDLR("ApMaxNumSta", s_setApMaxNumSta_pwf),
                   SWLA_DM_PARAM_HDLR("SetProbeReqCltMode", s_setRadioBoolVendorParam_pwf),
                   SWLA_DM_PARAM_HDLR("SetBfMode", s_setBfMode_pwf),
                   SWLA_DM_PARAM_HDLR("SetPowerSelection", s_setPowerSelection_pwf),
@@ -1496,6 +1488,9 @@ static void s_setAcsConfig_ocf(void* priv _UNUSED, amxd_object_t* object, const 
         } else if (swl_str_matches(pname, "AcsUpdateDoSwitch")) {
             newVal = amxc_var_dyncast(bool, newValue);
             whm_mxl_determineRadParamAction(pRad, pname, (newVal ? "1" : "0"));
+        } else if (swl_str_matches(pname, "AcsUse24Overlapped")) {
+            newVal = amxc_var_dyncast(bool, newValue);
+            whm_mxl_determineRadParamAction(pRad, pname, (newVal ? "1" : "0"));
         } else if (swl_str_matches(pname, "AcsFils")) {
             newVal = amxc_var_dyncast(bool, newValue);
             whm_mxl_determineRadParamAction(pRad, pname, (newVal ? "1" : "0"));
@@ -1514,6 +1509,29 @@ static void s_setAcsConfig_ocf(void* priv _UNUSED, amxd_object_t* object, const 
             if (pRadVendor) {
                 pRadVendor->bgAcsInterval = amxc_var_dyncast(uint16_t, newValue);
                 whm_mxl_configureBgAcs(pRad, pRadVendor->bgAcsInterval);
+            }
+        } else if (swl_str_matches(pname, "AcsBootupNonDfs")) {
+            if (pRadVendor && wld_rad_is_5ghz(pRad)) {
+                pRadVendor->acsBootupNonDfs = amxc_var_dyncast(bool, newValue);
+                if (!pRadVendor->acsBootupNonDfs) {
+                    pRadVendor->acsBootupNonDfsAllowExclusion = false;
+                }
+                whm_mxl_determineRadParamAction(pRad, pname,
+                    pRadVendor->acsBootupNonDfs ? "1" : "0");
+            } else {
+                SAH_TRACEZ_NOTICE(ME, "%s: AcsBootupNonDfs is only supported on 5GHz radio, ignoring", pRad->Name);
+            }
+        } else if (swl_str_matches(pname, "AcsBootupNonDfsAllowExclusion")) {
+            if (pRadVendor && wld_rad_is_5ghz(pRad)) {
+                if (pRadVendor->acsBootupNonDfs) {
+                    pRadVendor->acsBootupNonDfsAllowExclusion = amxc_var_dyncast(bool, newValue);
+                    whm_mxl_determineRadParamAction(pRad, pname,
+                        pRadVendor->acsBootupNonDfsAllowExclusion ? "1" : "0");
+                } else {
+                    SAH_TRACEZ_NOTICE(ME, "%s: AcsBootupNonDfsAllowExclusion is only supported when AcsBootupNonDfs is enabled", pRad->Name);
+                }
+            } else {
+                SAH_TRACEZ_NOTICE(ME, "%s: AcsBootupNonDfsAllowExclusion is only supported on 5GHz radio, ignoring", pRad->Name);
             }
         } else if (swl_str_matches(pname, "AcsChanList")) {
             newValStr = amxc_var_dyncast(cstring_t, newValue);
@@ -1534,9 +1552,6 @@ static void s_setAcsConfig_ocf(void* priv _UNUSED, amxd_object_t* object, const 
                 amxd_object_set_value(cstring_t, object, "AcsFallbackChan", AcsFallbackChannel);
                 whm_mxl_determineRadParamAction(pRad, "AcsFallbackChan", AcsFallbackChannel);
             }
-        /**
-         * AcsUse24Overlapped is missing need to implement
-         */
         } else {
             continue;
         }
@@ -2097,30 +2112,28 @@ void _whm_mxl_rad_updateObssCoexistence(const char* const sig_name _UNUSED,
     SAH_TRACEZ_OUT(ME);
 }
 
-swl_rc_ne whm_mxl_rad_supstd(T_Radio* pRad, swl_radioStandard_m radioStandards) {
+int whm_mxl_rad_supstd(T_Radio* pRad, swl_radioStandard_m radioStandards) {
     ASSERTS_NOT_NULL(pRad, SWL_RC_INVALID_PARAM, ME, "rad is NULL");
     ASSERT_TRUE(swl_radStd_isValid(radioStandards, "rad_supstd"), SWL_RC_INVALID_PARAM, ME,
                 "%s rad_supstd : Invalid operatingStandards %#x",
                 pRad->Name, radioStandards);
-    swl_rc_ne rc;
-
-    CALL_NL80211_FTA_RET(rc, mfn_wrad_supstd, pRad, radioStandards);
-    ASSERT_FALSE(rc < SWL_RC_OK, rc, ME, "fail in generic call");
-
+    int res = 1;
     T_AccessPoint* pAP = NULL;
-    if (wld_secDmn_isAlive(pRad->hostapd)) {
-        if (wld_rad_is_24ghz(pRad)) {
-            amxc_llist_for_each(it, &pRad->llAP) {
-                pAP = amxc_llist_it_get_data(it, T_AccessPoint, it);
-                mxl_VapVendorData_t* mxlVapVendorData = mxl_vap_getVapVendorData(pAP);
-                if ((pAP != NULL) && (mxlVapVendorData != NULL)) {
-                    if (whm_mxl_utils_isDummyVap(pAP))
-                        continue;
-                    if (wld_rad_checkEnabledRadStd(pRad, SWL_RADSTD_N) && mxlVapVendorData->vendorVht) {
-                        wld_ap_hostapd_setParamValue(pAP, "vendor_vht", "1", "");
-                    } else {
-                        wld_ap_hostapd_setParamValue(pAP, "vendor_vht", "0", "");
-                    }
+    bool anyMldChanged = false;
+
+    /* Set new standards - mirroring generic fta */
+    pRad->operatingStandards = radioStandards;
+
+    if (wld_rad_is_24ghz(pRad) && wld_secDmn_isAlive(pRad->hostapd)) {
+        wld_rad_forEachAp(pAP, pRad) {
+            mxl_VapVendorData_t* mxlVapVendorData = mxl_vap_getVapVendorData(pAP);
+            if (mxlVapVendorData) {
+                if (whm_mxl_utils_isDummyVap(pAP))
+                    continue;
+                if (wld_rad_checkEnabledRadStd(pRad, SWL_RADSTD_N) && mxlVapVendorData->vendorVht) {
+                    wld_ap_hostapd_setParamValue(pAP, "vendor_vht", "1", "");
+                } else {
+                    wld_ap_hostapd_setParamValue(pAP, "vendor_vht", "0", "");
                 }
             }
         }
@@ -2129,11 +2142,17 @@ swl_rc_ne whm_mxl_rad_supstd(T_Radio* pRad, swl_radioStandard_m radioStandards) 
     wld_rad_forEachAp(pAP, pRad) {
         if (whm_mxl_mlo_checkMldConfigChange(pAP)) {
             SAH_TRACEZ_INFO(ME, "%s: Is part of Inactive AP-MLD - requesting MLD action", pAP->alias);
-            whm_mxl_mlo_requestMldAction(pAP, true);
+            whm_mxl_mlo_requestMldAction(pAP, false);
+            anyMldChanged = true;
         }
-   }
+    }
 
-    return rc;
+    if (!anyMldChanged) {
+        SAH_TRACEZ_INFO(ME, "%s: No change in MLD - call generic supstd fta", pRad->Name);
+        CALL_NL80211_FTA_RET(res, mfn_wrad_supstd, pRad, radioStandards);
+    }
+
+    return res;
 }
 
 bool whm_mxl_rad_setCtrlSockSyncNeeded(T_Radio* pRad, bool flag) {

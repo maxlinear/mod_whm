@@ -4,10 +4,6 @@
             select Vendor {
                 on event "*" call whm_mxl_rad_setVendorObj_ocf;
 
-                /*override_6g_mbssid_default_mode, Only for 6GHz*/
-                %persistent bool OverrideMBSSID {
-                    default 0;
-                }
                 /* ap_max_num_sta MAX_STA_COUNT=2007
                 */
                 %persistent uint16 ApMaxNumSta = 2007 {
@@ -779,6 +775,18 @@
                     %persistent string AcsChanList {
                         default "";
                     }
+                    /*
+                    * Initial 5GHz ACS selects non-DFS channel and re-evaluates after timer.
+                    */
+                    %persistent bool AcsBootupNonDfs {
+                        default false;
+                    }
+                    /*
+                    * Same as AcsBootupNonDfs with exclusion-list support during bootup phase.
+                    */
+                    %persistent bool AcsBootupNonDfsAllowExclusion {
+                        default false;
+                    }
                 }
                 /*
                 * AFC custom config parameters
@@ -1191,16 +1199,6 @@
                 }
                 /*enable_bss_load_ie*/
                 %persistent bool EnableBssLoad {
-                    default false;
-                }
-                /*
-                * Configure WPA3 Personal Compatibility Mode
-                * NOTE: This is a hacky method. At the time of implementation
-                *       upstream PWHM does not support this mode. This mode 
-                *       should be deprecated when said functionality is
-                *       available in PWHM.
-                */
-                %persistent bool EnableWPA3PersonalCompatibility {
                     default false;
                 }
                 %persistent bool SCSEnable {

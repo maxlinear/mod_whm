@@ -83,7 +83,6 @@ static void s_mxl_vap_init_vendordata(T_AccessPoint* pAP) {
 
     /* Add desired initializations here*/
     mxlVapVendorData->saeExtKey = 0;
-    mxlVapVendorData->EnableWPA3PersonalCompatibility = 0;
     mxlVapVendorData->disableBeaconProt = false;
 
     // Init Default MLD Info
@@ -169,6 +168,20 @@ void whm_mxl_vap_destroyHook(T_AccessPoint* pAP){
     s_mxl_deinit_vendorVapData(mxlVapVendorData);
     /* Unregister to WDS events is done during Radio destroy hook */
     free(mxlVapVendorData);
+}
+
+whm_mxl_mbss_type_e whm_mxl_vap_getMbssApType(T_AccessPoint* pAP) {
+    ASSERT_NOT_NULL(pAP, MXL_MBSS_TYPE_NONE, ME, "pAP is NULL");
+    T_Radio* pRad = (T_Radio*) pAP->pRadio;
+    ASSERT_NOT_NULL(pRad, MXL_MBSS_TYPE_NONE, ME, "pRad is NULL");
+    whm_mxl_mbss_type_e mbssType = MXL_MBSS_TYPE_NONE;
+    if (whm_mxl_utils_isDummyVap(pAP) || !wld_rad_hasMbssidAds(pRad)) {
+        return MXL_MBSS_TYPE_NONE;
+    }
+    T_AccessPoint* pMbssTxAp = whm_mxl_utils_getFirstVapRefEnabled(pRad);
+    ASSERT_NOT_NULL(pMbssTxAp, MXL_MBSS_TYPE_NONE, ME, "pMbssTxAp is NULL");
+    mbssType = (pMbssTxAp == pAP) ? MXL_MBSS_TYPE_TX_BSS : MXL_MBSS_TYPE_NON_TX_BSS;
+    return mbssType;
 }
 
 static swl_rc_ne s_getDevDiagResults3Cb(swl_rc_ne rc, struct nlmsghdr* nlh, void* priv) {
@@ -438,10 +451,10 @@ static void s_startSyncOnEnable(T_AccessPoint* pAP) {
 
 int whm_mxl_vap_enable(T_AccessPoint* pAP, int enable, int set) {
     int ret;
-    SAH_TRACEZ_WARNING(ME, "%s: vap enable %d --> %d - Set:%d", pAP->alias, pAP->enable, enable, set);
     CALL_NL80211_FTA_RET(ret, mfn_wvap_enable, pAP, enable, set);
     ASSERTS_FALSE(ret < 0, ret, ME, "%s: fail to enable AP flag 0x%x val %d", pAP->name, set, enable);
     if(set & SET) {
+        SAH_TRACEZ_INFO(ME, "%s: vap enable %d --> %d - Set:%d", pAP->alias, pAP->enable, enable, set);
         pAP->enable = enable;
         T_Radio* pRad = (T_Radio*) pAP->pRadio;
         bool dumVapEnable = s_hasEnabledRealVap(pRad);
@@ -499,8 +512,16 @@ int whm_mxl_vap_ssid(T_AccessPoint* pAP, char* buf, int bufsize, int set) {
 
     /* Choose config flow */
     if ((set & SET) && (whm_mxl_chooseVapConfigFlow(pAP, WHM_MXL_CONFIG_TYPE_SSID) == WHM_MXL_CONFIG_FLOW_RECONF)) {
-            SAH_TRACEZ_INFO(ME, "%s: SSID sync requesting reconf", pAP->alias);
-            whm_mxl_vap_requestReconf(pAP);
+        SAH_TRACEZ_INFO(ME, "%s: SSID sync requesting reconf", pAP->alias);
+        whm_mxl_vap_requestReconf(pAP);
+    } else if (set & SET) {
+        SAH_TRACEZ_INFO(ME, "%s: SSID set and sighup", pAP->alias);
+        if (wld_wpaCtrlInterface_isReady(pAP->wpaCtrlInterface)) {
+            if (wld_ap_hostapd_setSsid(pAP, buf) < SECDMN_ACTION_OK_DONE) {
+                rc = SWL_RC_ERROR;
+            }
+        }
+        whm_mxl_sighupHapd(pAP->pRadio);
     } else {
         /* Call generic implementation */
         SAH_TRACEZ_INFO(ME, "%s: Continue to generic SSID call", pAP->alias);
@@ -1113,39 +1134,6 @@ static void s_setHiddenSSIDType_pwf(void* priv _UNUSED, amxd_object_t* object, a
     SAH_TRACEZ_OUT(ME);
 }
 
-static void s_setEnableWPA3PersonalCompatibility_pwf(void* priv _UNUSED, amxd_object_t* object, amxd_param_t* param _UNUSED, const amxc_var_t* const newParamValues) {
-    SAH_TRACEZ_IN(ME);
-    /* WiFi.AccessPoint.{}.Vendor */
-    amxd_object_t* vapObj = amxd_object_get_parent(object);
-    T_AccessPoint* pAP = wld_ap_fromObj(vapObj);
-    ASSERT_NOT_NULL(pAP, , ME, "No AccessPoint Mapped");
-    T_Radio* pRad = pAP->pRadio;
-    ASSERT_NOT_NULL(pRad, , ME, "No Radio Mapped");
-    mxl_VapVendorData_t* mxlVapVendorData = mxl_vap_getVapVendorData(pAP);
-    ASSERT_NOT_NULL(mxlVapVendorData, , ME, "mxlVapVendorData is NULL");
-    swl_rc_ne rc;
-
-    bool EnableWPA3PersonalCompatibility = amxc_var_dyncast(bool, newParamValues);
-    mxlVapVendorData->EnableWPA3PersonalCompatibility = EnableWPA3PersonalCompatibility;
-    if (whm_mxl_mlo_checkMldConfigChange(pAP)) {
-        SAH_TRACEZ_INFO(ME, "%s: Is part of MLD - requesting MLD action", pAP->alias);
-        whm_mxl_mlo_requestMldAction(pAP, false);
-        SAH_TRACEZ_OUT(ME);
-        return;
-    }
-    if (EnableWPA3PersonalCompatibility == true) {
-        SAH_TRACEZ_INFO(ME, "Enabling WPA3 Personal Compatibility Mode for %s, DON'T trust security mode set in PWHM!", pAP->alias);
-        whm_mxl_toggleWPA3PersonalCompatibility(pAP);
-    } else {
-        SAH_TRACEZ_INFO(ME, "Disabling WPA3 Personal Compatibility Mode for %s, reverting back to the security mode set in PWHM!", pAP->alias);
-        CALL_NL80211_FTA_RET(rc, mfn_wvap_sec_sync, pAP, SET);
-        wld_autoCommitMgr_notifyVapEdit(pAP);
-        whm_mxl_toggleWPA3PersonalCompatibility(pAP);
-    }
-
-    SAH_TRACEZ_OUT(ME);
-}
-
 static void s_setAggrConfig_pwf(void* priv _UNUSED, amxd_object_t* object, amxd_param_t* param, const amxc_var_t* const newParamValues) {
     SAH_TRACEZ_IN(ME);
     /* WiFi.AccessPoint.{}.Vendor */
@@ -1342,7 +1330,6 @@ SWLA_DM_HDLRS(sVapVendorDmHdlrs,
                   SWLA_DM_PARAM_HDLR("EnableBssLoad", s_setBssLoad_pwf),
                   SWLA_DM_PARAM_HDLR("MboCellAware", s_setMboCellAware_pwf),
                   SWLA_DM_PARAM_HDLR("SaeExtKey", s_setSaeExtKey_pwf),
-                  SWLA_DM_PARAM_HDLR("EnableWPA3PersonalCompatibility", s_setEnableWPA3PersonalCompatibility_pwf),
                   SWLA_DM_PARAM_HDLR("SetAggrConfig", s_setAggrConfig_pwf),
                   SWLA_DM_PARAM_HDLR("Set11nProtection", s_set11nProtection_pwf),
                   SWLA_DM_PARAM_HDLR("EmlCapabTransitionTimeout", s_setEmlCapabTransitionTimeout_pwf),

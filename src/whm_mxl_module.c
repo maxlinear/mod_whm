@@ -183,6 +183,7 @@ bool whm_mxl_module_init(void) {
     fta.mfn_wrad_delvapif = whm_mxl_rad_delVapIf;
     fta.mfn_wrad_addendpointif = whm_mxl_rad_addEndpointIf;
     fta.mfn_wrad_enable = whm_mxl_rad_enable;
+    fta.mfn_wrad_sync = whm_mxl_rad_sync;
     fta.mfn_wrad_stats = whm_mxl_rad_stats;
     fta.mfn_wrad_antennactrl = whm_mxl_rad_antennaCtrl;
     fta.mfn_wrad_beamforming = whm_mxl_rad_beamforming;

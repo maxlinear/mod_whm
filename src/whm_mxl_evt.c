@@ -93,6 +93,14 @@ static void s_vendorEvtCb(void* pRef, void* pData _UNUSED, struct nlmsghdr* nlh,
         mxl_parseCsiStatsEvt(pRad, tb);
         break;
     }
+    case LTQ_NL80211_VENDOR_EVENT_NEW_MLD_VAP: {
+        mxl_parseNewMldVapEvt(pRad, tb);
+        break;
+    }
+    case LTQ_NL80211_VENDOR_EVENT_DEL_MLD_VAP: {
+        mxl_parseDelMldVapEvt(pRad, tb);
+        break;
+    }
     default: {
         SAH_TRACEZ_INFO(ME, "%s: unknown vendor event %"PRId64"", pRad->Name, subcmd);
         break;
@@ -337,7 +345,46 @@ static swl_rc_ne s_mxl_DfsCacEvts(void* userData, char* ifName _UNUSED, char* ev
     /* Returning < SWL_RC_DONE will make pwhm to process foreground DFS-CAC-START
      * in  s_processStdEvent.
      */
-    return  SWL_RC_OK;
+    return SWL_RC_OK;
+}
+
+static swl_rc_ne s_mxl_MldApEnabled(void* userData, char* ifName _UNUSED,
+                                   char* event _UNUSED, char* params) {
+    /* Expected msg format:
+     * <3>MLD-AP-ENABLED mld_mac=%s num_links=%d
+     */
+    T_Radio* pRad = (T_Radio*) userData;
+    ASSERT_NOT_NULL(pRad, SWL_RC_INVALID_PARAM, ME, "NULL");
+    swl_macBin_t mldMacBin = SWL_MAC_BIN_NEW();
+    char mldMacStr[SWL_MAC_CHAR_LEN] = {0};
+    uint32_t numLinks = 0;
+
+    ASSERTI_TRUE(wld_wpaCtrl_getValueStr(params, "mld_mac", mldMacStr, sizeof(mldMacStr)) > 0, SWL_RC_ERROR, ME, "MLD MAC not found");
+    numLinks = wld_wpaCtrl_getValueInt(params, "num_links");
+
+    SAH_TRACEZ_INFO(ME, "%s: MLD AP enabled mld_mac=%s num_links=%d", pRad->Name, mldMacStr, numLinks);
+
+    SWL_MAC_CHAR_TO_BIN(&mldMacBin, mldMacStr);
+    whm_mxl_mlo_newMldVapEvt(pRad, &mldMacBin, numLinks);
+    return SWL_RC_DONE;
+}
+
+static swl_rc_ne s_mxl_MldApDisabled(void* userData, char* ifName _UNUSED,
+                                   char* event _UNUSED, char* params _UNUSED) {
+    /* Expected msg format:
+     * <3>MLD-AP-DISABLED mld_mac=%s
+     */
+    T_Radio* pRad = (T_Radio*) userData;
+    ASSERT_NOT_NULL(pRad, SWL_RC_INVALID_PARAM, ME, "NULL");
+    swl_macBin_t mldMacBin = SWL_MAC_BIN_NEW();
+    char mldMacStr[SWL_MAC_CHAR_LEN] = {0};
+
+    ASSERTI_TRUE(wld_wpaCtrl_getValueStr(params, "mld_mac", mldMacStr, sizeof(mldMacStr)) > 0, SWL_RC_ERROR, ME, "MLD MAC not found");
+    SAH_TRACEZ_INFO(ME, "%s: MLD AP disabled mld_mac=%s", pRad->Name, mldMacStr);
+
+    SWL_MAC_CHAR_TO_BIN(&mldMacBin, mldMacStr);
+    whm_mxl_mlo_delMldVapEvt(pRad, &mldMacBin);
+    return SWL_RC_DONE;
 }
 
 SWL_TABLE(mxl_CustomWpaCtrlEvents,
@@ -346,6 +393,8 @@ SWL_TABLE(mxl_CustomWpaCtrlEvents,
           ARR(
               {"AP-BW-CHANGED", &s_mxl_apBwChanged},
               {"DFS-CAC-START", &s_mxl_DfsCacEvts},
+              {"MLD-AP-ENABLED", &s_mxl_MldApEnabled},
+              {"MLD-AP-DISABLED", &s_mxl_MldApDisabled},
               ));
 
 static custEvtParser_f s_mxl_getCustomEventParser(char* eventName) {
@@ -401,46 +450,6 @@ static swl_rc_ne s_setRadioWpaCtrlEvtHandlers(T_Radio* pRad) {
     return SWL_RC_OK;
 }
 
-/**
- * @brief Update Vendor MLD State (whm_mxl_mlt_t) to Generic MLD (wld_mld_t).
- *
- * @details
- * Queries the wlan driver for APMLD info, copies mainLink identity, then
- * updates all generic link data. If the NL80211 query fails, a deferred
- * retry is scheduled (up to MLO_GENERIC_STATE_UPDATE_RETRY_MAX times at
- * MLO_GENERIC_STATE_UPDATE_RETRY_MS intervals).
- *
- * @note operation is IDEMPOTENT by design
- *
- * @param pAP Pointer to the access point structure.
- */
-static void s_updateGenericAPMLD(T_AccessPoint* pAP) {
-    whm_mxl_mld_t* pMld = whm_mxl_mlo_getMldVap(pAP);
-    ASSERT_NOT_NULL(pMld, , ME, "pMld is NULL");
-
-    whm_mxl_nl80211_apMld_t* pNlApMld = whm_mxl_mlo_getApMldInfo(pMld);
-    if (!pNlApMld) {
-        if (pMld->genericUpdateRetryCtr < MLO_GENERIC_STATE_UPDATE_RETRY_MAX) {
-            pMld->genericUpdateRetryCtr++;
-            SAH_TRACEZ_WARNING(ME, "%s: MLD(%d) NL failed, retry(%u) in %u ms",
-                               pAP->alias, pMld->mloId, pMld->genericUpdateRetryCtr,
-                               MLO_GENERIC_STATE_UPDATE_RETRY_MS);
-            swla_delayExec_addTimeout((swla_delayExecFun_cbf) s_updateGenericAPMLD,
-                                      pAP, MLO_GENERIC_STATE_UPDATE_RETRY_MS);
-        } else {
-            SAH_TRACEZ_ERROR(ME, "%s: MLD(%d) NL query max retries (%u) exhausted",
-                             pAP->alias, pMld->mloId, MLO_GENERIC_STATE_UPDATE_RETRY_MAX);
-        }
-        return;
-    }
-
-    pMld->genericUpdateRetryCtr = 0;
-    whm_mxl_mlo_copyNl80211ApMldToMld(pMld, pNlApMld);
-    free(pNlApMld);
-    whm_mxl_mlo_updateGenericMld(pMld);
-    SAH_TRACEZ_INFO(ME, "%s: MLD(%d) Updated Generic MLD's", pAP->alias, pMld->mloId);
-}
-
 static void s_newInterfaceCb(void* pRef, void* pData,
                              wld_nl80211_ifaceInfo_t* pIfaceInfo) {
     T_Radio* pRad = (T_Radio*) pRef;
@@ -451,18 +460,8 @@ static void s_newInterfaceCb(void* pRef, void* pData,
 
     SWL_CALL(pRadVendor->wldNlHandlers.fNewInterfaceCb, pRef, pData, pIfaceInfo);
 
-    // Custom Vendor NEW_INTERFACE handling below
+    // Custom Vendor NEW_INTERFACE handling below - if needed
     SAH_TRACEZ_INFO(ME, "%s: vendor NEW_INTERFACE handling", pRad->Name);
-
-    T_AccessPoint* pAP = wld_rad_vap_from_name(pRad, pIfaceInfo->name);
-    ASSERT_NOT_NULL(pAP, , ME, "pAP NULL");
-    whm_mxl_mld_t* pMld = whm_mxl_mlo_getMldVap(pAP);
-    if (whm_mxl_mlo_getMldStatus(pMld)) {
-        SAH_TRACEZ_INFO(ME, "%s: deferring generic state update by %u ms",
-                        pIfaceInfo->name, MLO_GENERIC_STATE_UPDATE_RETRY_MS);
-        swla_delayExec_addTimeout((swla_delayExecFun_cbf) s_updateGenericAPMLD,
-                                  pAP, MLO_GENERIC_STATE_UPDATE_RETRY_MS);
-    }
 }
 
 /**
@@ -536,16 +535,8 @@ static void s_apEnabledCb(void* userData, char* ifName) {
 
     SWL_CALL(pVapVendor->wldEvtHandlers.fApEnabledCb, userData, ifName);
 
-    // Custom Vendor AP-ENABLED handling below
+    // Custom Vendor AP-ENABLED handling below - if needed
     SAH_TRACEZ_INFO(ME, "%s: vendor AP-ENABLED handling", ifName);
-
-    whm_mxl_mld_t* pMld = whm_mxl_mlo_getMldVap(pAP);
-    if (whm_mxl_mlo_getMldStatus(pMld)) {
-        SAH_TRACEZ_INFO(ME, "%s: deferring generic state update by %u ms",
-                        ifName, MLO_GENERIC_STATE_UPDATE_RETRY_MS);
-        swla_delayExec_addTimeout((swla_delayExecFun_cbf) s_updateGenericAPMLD,
-                                  pAP, MLO_GENERIC_STATE_UPDATE_RETRY_MS);
-    }
 }
 
 static void s_selectPrimLinkIface(void* userData, const char* ifName,
