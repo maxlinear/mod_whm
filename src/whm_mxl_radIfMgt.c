@@ -333,7 +333,7 @@ SWL_TABLE(sHapdStatesMaps,
               {"ENABLED", CM_RAD_UP},
               ));
 
-swl_rc_ne whm_mxl_hapd_getRadState(T_Radio* pRad, chanmgt_rad_state* pDetailedState) {
+swl_rc_ne whm_mxl_hapd_getRadState(T_Radio* pRad, chanmgt_rad_state* pDetailedState, bool checkDeferredStates) {
     ASSERTS_NOT_NULL(pRad, SWL_RC_INVALID_PARAM, ME, "NULL");
     wld_wpaCtrlInterface_t* mainIface = s_getMainIface(pRad);
     ASSERTS_NOT_NULL(mainIface, SWL_RC_ERROR, ME, "%s: No main hapd wpactrl iface", pRad->Name);
@@ -345,6 +345,16 @@ swl_rc_ne whm_mxl_hapd_getRadState(T_Radio* pRad, chanmgt_rad_state* pDetailedSt
        (wld_wpaCtrl_getValueStr(reply, "state", state, sizeof(state)) <= 0)) {
         SAH_TRACEZ_INFO(ME, "%s: status not yet available", pRad->Name);
         return SWL_RC_ERROR;
+    }
+    if (checkDeferredStates) {
+        bool isDeferState = (swl_str_matches(state, "HT_SCAN") || swl_str_matches(state, "DFS") || swl_str_matches(state, "DISABLED"));
+#ifdef CONFIG_VENDOR_MXL_PROPRIETARY
+        isDeferState = isDeferState || swl_str_matches(state, "ACS_DONE");
+#endif /* CONFIG_VENDOR_MXL_PROPRIETARY */
+        if (isDeferState) {
+            SAH_TRACEZ_WARNING(ME, "%s: hapd in defer state[%s]", pRad->Name, state);
+            return SWL_RC_INVALID_STATE;
+        }
     }
     chanmgt_rad_state* pRadDetState = (chanmgt_rad_state*) swl_table_getMatchingValue(&sHapdStatesMaps, 1, 0, state);
     ASSERTI_NOT_NULL(pRadDetState, SWL_RC_ERROR, ME, "%s: unknown hapd state(%s)", pRad->Name, state);

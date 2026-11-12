@@ -291,7 +291,7 @@ int whm_mxl_rad_enable(T_Radio* pRad, int val, int flag) {
             // let hostapd/wpa_supp manage the main iface enabling
             if(!val) {
                 chanmgt_rad_state radDetState = CM_RAD_UNKNOWN;
-                swl_rc_ne rc = whm_mxl_hapd_getRadState(pRad, &radDetState);
+                swl_rc_ne rc = whm_mxl_hapd_getRadState(pRad, &radDetState, false);
                 if (swl_rc_isOk(rc) && s_isIfaceDisableAllowed(radDetState)) {
                     wld_linuxIfUtils_setState(wld_rad_getSocket(pRad), pRad->Name, false);
                 }
@@ -1814,6 +1814,9 @@ swl_rc_ne whm_mxl_rad_startPltfACS(T_Radio* pRad , const amxc_var_t* const args)
         return whm_mxl_confModHapd(pRad, masterVap);
     }
 
+    int totalPossibleChannels = pRad->nrPossibleChannels;
+    int exclusionChannelsCount = 0;
+
     amxc_var_for_each(data, variant) {
         uint32_t opclass = GET_UINT32(data, "opclass");
         amxc_var_t* exclude_channels_var = GET_ARG(data, "exclude_channels");
@@ -1822,14 +1825,38 @@ swl_rc_ne whm_mxl_rad_startPltfACS(T_Radio* pRad , const amxc_var_t* const args)
             return SWL_RC_INVALID_PARAM;
         }
 
+        const swl_operatingClassInfo_t* entry = swl_chanspec_getGlobalOpClassInfoByOpClass(opclass);
+        if (!entry || !entry->channels) {
+            continue;
+        }
+
         amxc_llist_t* exclude_channels_list = amxc_var_dyncast(amxc_llist_t, exclude_channels_var);
         amxc_llist_for_each(it, exclude_channels_list) {
             amxc_var_t* item = amxc_var_from_llist_it(it);
             uint8_t channel = amxc_var_dyncast(uint8_t, item);
 
-            if (!wld_rad_hasChannel(pRad, channel)) {
+            bool valid = false;
+            for (uint8_t i=0; entry->channels[i] != 0; i++) {
+                if (entry->channels[i] == channel) {
+                    valid = true;
+                    break;
+                }
+            }
+
+            if (!valid) {
                 SAH_TRACEZ_WARNING(ME, "%s: Skip invalid channel %u", pRad->Name, channel);
                 continue;
+            }
+
+            if (entry->bandwidth == SWL_BW_20MHZ && wld_rad_hasChannel(pRad, channel)) {
+                // For opclass 125, only increment if channel > 161
+                if (entry->operClass == 125) {
+                    if (channel > 161) {
+                        exclusionChannelsCount++;
+                    }
+                } else {
+                    exclusionChannelsCount++;
+                }
             }
 
             // Calculate the required length for the new entry
@@ -1853,7 +1880,13 @@ swl_rc_ne whm_mxl_rad_startPltfACS(T_Radio* pRad , const amxc_var_t* const args)
         }
     }
 
-    if (cmd) {
+    if ((totalPossibleChannels - exclusionChannelsCount) == 1) {
+        SAH_TRACEZ_INFO(ME, "%s: Skipping ACS exclusion command as exclusion list is for static channel", pRad->Name);
+        free(cmd);
+        return SWL_RC_OK;
+    }
+
+    if (cmd && ((totalPossibleChannels - exclusionChannelsCount) > 1)) {
         SAH_TRACEZ_INFO(ME, "%s: ACS Exclude OpClass/Channel list: %s", pRad->Name, cmd);
         if (ctrlIfaceReady && radioIsAlive) {
             // If cmd is valid then count should be non-zero

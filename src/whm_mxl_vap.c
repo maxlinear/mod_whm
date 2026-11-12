@@ -40,6 +40,8 @@
 
 #define START_ENABLE_SYNC_TIMEOUT_MS 10000
 #define MAX_SSID_LEN 36
+#define RECONF_BSS_DEFER_DELAY_MS    10000
+#define RECONF_BSS_MAX_RETRIES       9
 
 #define ME "mxlVap"
 
@@ -92,6 +94,7 @@ static void s_mxl_vap_init_vendordata(T_AccessPoint* pAP) {
     mxlVapVendorData->wdsPrimaryLink = false;
     mxlVapVendorData->wdsForce6GAssoc = false;
 
+    mxlVapVendorData->bssReconfRetryCount = 0;
     /* Init VAP enable sync timer */
     amxp_timer_new(&mxlVapVendorData->onVapEnableSyncTimer, s_enableSync, pAP);
     return;
@@ -155,6 +158,7 @@ int whm_mxl_vap_createHook(T_AccessPoint* pAP) {
 static void s_mxl_deinit_vendorVapData(mxl_VapVendorData_t* mxlVapVendorData) {
     ASSERT_NOT_NULL(mxlVapVendorData, , ME, "mxlVapVendorData is NULL");
     amxp_timer_delete(&mxlVapVendorData->onVapEnableSyncTimer);
+    amxp_timer_delete(&mxlVapVendorData->bssReconfRetryTimer);
     return;
 }
 
@@ -660,7 +664,7 @@ swl_rc_ne whm_mxl_vap_transfer_sta(T_AccessPoint* pAP, wld_transferStaArgs_t* pa
                           " valid_int=%d"
                           , params->validity);
     }
-    if(swl_mac_charIsValidStaMac(&params->targetBssid)) {
+    if(swl_mac_charIsValidStaMac(&params->targetBssid) || swl_mac_charIsBroadcast(&params->targetBssid)) {
         swl_str_catFormat(cmd, sizeof(cmd),
                           " neighbor=%s"
                           ",%u,%d,%d,%d"   //<bssidInfo>,<operClass>,<channel>,<phyType>
@@ -1755,6 +1759,13 @@ swl_rc_ne whm_mxl_vap_updated_neighbor(T_AccessPoint* pAP, T_ApNeighbour* pApNei
     return rc;
 }
 
+static void s_bssReconfRetry_th(amxp_timer_t* timer _UNUSED, void* userdata) {
+    T_AccessPoint* pAP = (T_AccessPoint*) userdata;
+    ASSERT_NOT_NULL(pAP, , ME, "NULL");
+    SAH_TRACEZ_NOTICE(ME, "%s: retrying BSS reconf after deferred-state delay", pAP->alias);
+    whm_mxl_vap_requestReconf(pAP);
+}
+
 /**
  * @brief Request to reconf BSS from reconf FSM
  *
@@ -1763,8 +1774,41 @@ swl_rc_ne whm_mxl_vap_updated_neighbor(T_AccessPoint* pAP, T_ApNeighbour* pApNei
  */
 void whm_mxl_vap_requestReconf(T_AccessPoint* pAP) {
     ASSERTI_NOT_NULL(pAP, , ME, "NULL");
+    T_Radio* pRad = pAP->pRadio;
+    ASSERT_NOT_NULL(pRad, , ME, "pRadio is NULL");
     mxl_VapVendorData_t* pVapVendor = mxl_vap_getVapVendorData(pAP);
     ASSERT_NOT_NULL(pVapVendor, , ME, "pVapVendor is NULL");
+
+    if (whm_mxl_hapd_getRadState(pRad, NULL, true) == SWL_RC_INVALID_STATE) {
+        /* If a retry is already scheduled, queue this request silently — the timer will pick up
+         * all pending config changes when it fires, so the count must not be inflated. */
+        if (pVapVendor->bssReconfRetryTimer) {
+            amxp_timer_state_t state = amxp_timer_get_state(pVapVendor->bssReconfRetryTimer);
+            if ((state == amxp_timer_started) || (state == amxp_timer_running)) {
+                SAH_TRACEZ_NOTICE(ME, "%s: BSS reconf deferred (retry %u/%u in flight), new request queued",
+                                  pAP->alias, pVapVendor->bssReconfRetryCount, RECONF_BSS_MAX_RETRIES);
+                return;
+            }
+        }
+        pVapVendor->bssReconfRetryCount++;
+        if (pVapVendor->bssReconfRetryCount > RECONF_BSS_MAX_RETRIES) {
+            SAH_TRACEZ_WARNING(ME, "%s: BSS reconf dropped after %u retries - radio in deferred state",
+                               pAP->alias, RECONF_BSS_MAX_RETRIES);
+            pVapVendor->bssReconfRetryCount = 0;
+            return;
+        }
+        SAH_TRACEZ_NOTICE(ME, "%s: Radio in deferred state, scheduling BSS reconf retry %u/%u in %ums",
+                          pAP->alias, pVapVendor->bssReconfRetryCount, RECONF_BSS_MAX_RETRIES,
+                          RECONF_BSS_DEFER_DELAY_MS);
+        if (!pVapVendor->bssReconfRetryTimer) {
+            amxp_timer_new(&pVapVendor->bssReconfRetryTimer, s_bssReconfRetry_th, pAP);
+        }
+        amxp_timer_start(pVapVendor->bssReconfRetryTimer, RECONF_BSS_DEFER_DELAY_MS);
+
+        return;
+    }
+
+    pVapVendor->bssReconfRetryCount = 0;
     setBitLongArray(pVapVendor->reconfFsm.FSM_BitActionArray, FSM_BW, RECONF_FSM_DO_RECONF_BSS);
     whm_mxl_reconfMngr_notifyVapCommit(pAP);
 }

@@ -226,8 +226,24 @@ static swl_rc_ne s_getNaStaStats(T_Radio* pRad, T_NonAssociatedDevice* pMD, uint
     }
     if(pMD->operatingClass) {
         chanspec.band = swl_chanspec_operClassToFreq(pMD->operatingClass);
-        chanspec.bandwidth = swl_chanspec_operClassToBandwidth(pMD->operatingClass);
     }
+
+    /* Always use the max supported op class and bandwidth for the given
+     * channel and band. The controller may request a lower bandwidth, but
+     * we need to capture packets transmitting at higher bandwidths too. */
+    static const swl_bandwidth_e bwOrder[] = {
+        SWL_BW_320MHZ, SWL_BW_160MHZ, SWL_BW_80MHZ, SWL_BW_40MHZ, SWL_BW_20MHZ
+    };
+    swl_operatingClass_t maxOpClass = 0;
+    for(size_t i = 0; i < SWL_ARRAY_SIZE(bwOrder); i++) {
+        maxOpClass = swl_chanspec_getOperClassDirect(chanspec.channel, chanspec.band, bwOrder[i]);
+        if(maxOpClass) {
+            chanspec.bandwidth = bwOrder[i];
+            break;
+        }
+    }
+    SAH_TRACEZ_INFO(ME, "%s: using max opClass %d bw %d for band %d",
+                    pRad->Name, maxOpClass, chanspec.bandwidth, chanspec.band);
 
     int freq = wld_channel_getFrequencyOfChannel(chanspec);
     int center_channel = wld_channel_get_center_channel(chanspec);

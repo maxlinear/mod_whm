@@ -181,7 +181,7 @@ static void s_updateColocatedBeacons(void) {
             continue;
         }
         radDetState = CM_RAD_UNKNOWN;
-        rc = whm_mxl_hapd_getRadState(pOtherRad, &radDetState);
+        rc = whm_mxl_hapd_getRadState(pOtherRad, &radDetState, false);
         if ((rc == SWL_RC_OK) && (radDetState == CM_RAD_UP)) {
             T_AccessPoint* pAP;
             wld_rad_forEachAp(pAP, pOtherRad) {

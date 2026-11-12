@@ -85,6 +85,9 @@ typedef struct {
     bool disableBeaconProt;
     /* Copy of wld's default WPA ctrl event handlers */
     wld_wpaCtrl_evtHandlers_cb wldEvtHandlers;
+    /* BSS reconf deferred retry */
+    amxp_timer_t* bssReconfRetryTimer;
+    uint32_t bssReconfRetryCount;
 } mxl_VapVendorData_t;
 
 /* Macros Section */

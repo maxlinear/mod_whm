@@ -141,7 +141,7 @@ int whm_mxl_rad_status(T_Radio* pRad);
 int whm_mxl_rad_supstd(T_Radio* pRad, swl_radioStandard_m radioStandards);
 swl_rc_ne whm_mxl_getBgScanParams(T_Radio* pRad, mxl_bgScanParams_t *pBgScanParams);
 swl_rc_ne whm_mxl_setBgScanParams(T_Radio* pRad, mxl_bgScanParams_t *pBgScanParams);
-swl_rc_ne whm_mxl_hapd_getRadState(T_Radio* pRad, chanmgt_rad_state* pDetailedState);
+swl_rc_ne whm_mxl_hapd_getRadState(T_Radio* pRad, chanmgt_rad_state* pDetailedState, bool checkDeferredStates);
 bool whm_mxl_rad_setCtrlSockSyncNeeded(T_Radio* pRad, bool flag);
 bool whm_mxl_rad_isCtrlSockSyncNeeded(T_Radio* pRad);
 void whm_mxl_rad_requestReconf(T_Radio* pRad);

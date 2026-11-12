@@ -43,7 +43,6 @@
                     parameter MBSSIDAdvertisementMode = "On";
                 }
                 object Vendor {
-                    parameter OverrideMBSSID = true;
                     object ACS {
                         parameter AcsFils = true;
                     }
