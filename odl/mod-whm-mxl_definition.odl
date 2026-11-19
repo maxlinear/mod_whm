@@ -789,44 +789,6 @@
                     }
                 }
                 /*
-                * AFC custom config parameters
-                */
-                %persistent object AFC {
-                    on event "*" call whm_mxl_rad_setAfcConf_ocf;
-
-                    %persistent string AfcdSock{
-                        default "/var/run/afcd.sock";
-                    }
-                    %persistent string AfcOpClass{
-                        default "131,132,133,134,137";
-                     }
-                    %persistent string AfcFrequencyRange{
-                        default "5925:6425,6525:6875";
-                     }
-                    %persistent string AfcCertIds{
-                        default "US_47_CFR_PART_15_SUBPART_E:CID000";
-                     }
-                    %persistent string AfcSerialNumber{
-                        default "SN000";
-                     }
-                    %persistent string AfcLinearPolygon{
-                        default "-121.98586:37.381933";
-                     }
-                    %persistent int8 AfcLocationType = -1 {
-                        on action validate call check_range { min = -1, max = 2 };
-                        default "0";
-                     }
-                    %persistent string AfcRequestId {
-                        default "11235813";
-                     }
-                    %persistent string AfcRequestVersion {
-                        default "1.4";
-                     }
-                    %persistent string AfcdServerConf {
-                        default "0";
-                     }
-                }
-                /*
                 * BSS Color custom config parameters
                 */
                 %persistent object BssColor {

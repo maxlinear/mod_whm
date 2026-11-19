@@ -35,6 +35,8 @@ typedef struct {
     int clientfd;
 } whm_mxl_connection_t;
 
+bool whm_mxl_csi_init(void);
+void whm_mxl_csi_deinit(void);
 swl_rc_ne whm_mxl_rad_sensingCmd(T_Radio* pRad);
 swl_rc_ne whm_mxl_rad_sensingAddClient(T_Radio* pRad, wld_csiClient_t* client);
 swl_rc_ne whm_mxl_rad_sensingDelClient(T_Radio* pRad, swl_macChar_t macAddr);

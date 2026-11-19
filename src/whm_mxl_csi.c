@@ -31,7 +31,81 @@
 
 #define ME "mxlCsi"
 
+#define CSI_SOCKET_POLL_MS 100
+
 whm_mxl_connection_t conn = {.serverfd = -1, .clientfd = -1};
+static amxp_timer_t* s_csiSocketTimer = NULL;
+
+static void s_closeCsiClient() {
+    if(conn.clientfd >= 0) {
+        close(conn.clientfd);
+        conn.clientfd = -1;
+    }
+}
+
+// Detect a peer disconnection without consuming any pending data
+static void s_checkCsiClientAlive() {
+    char c;
+    ssize_t ret = recv(conn.clientfd, &c, 1, MSG_DONTWAIT);
+    if(ret > 0) {
+        return;
+    }
+    if((ret < 0) && ((errno == EAGAIN) || (errno == EWOULDBLOCK) || (errno == EINTR))) {
+        return;
+    }
+	 if(ret == 0) {
+        SAH_TRACEZ_INFO(ME, "Remote peer disconnected, fd %d", conn.clientfd);
+    } else {
+        SAH_TRACEZ_ERROR(ME, "Recv failed: error:%d:%s", errno, strerror(errno));
+	 }
+    s_closeCsiClient();
+}
+
+static void s_csiSocketTimerCb(amxp_timer_t* timer _UNUSED, void* userdata _UNUSED) {
+    if(conn.serverfd < 0) {
+        return;
+    }
+
+    if(conn.clientfd >= 0) {
+        s_checkCsiClientAlive();
+    }
+
+    if(conn.clientfd < 0) {
+        struct sockaddr_un clientAddr;
+        socklen_t addrLen = sizeof(clientAddr);
+        int clientfd = accept(conn.serverfd, (struct sockaddr*) &clientAddr, &addrLen);
+        if(clientfd >= 0) {
+            conn.clientfd = clientfd;
+            SAH_TRACEZ_INFO(ME, "New remote peer connected, fd %d", conn.clientfd);
+        } else if((errno != EAGAIN) && (errno != EWOULDBLOCK)) {
+            SAH_TRACEZ_ERROR(ME, "Accept failed: error:%d:%s", errno, strerror(errno));
+        }
+    }
+}
+
+// The timer lives from module init to deinit: toggling CSI only starts/stops it,
+// so it can never accumulate duplicate polling loops
+bool whm_mxl_csi_init(void) {
+    ASSERT_TRUE(s_csiSocketTimer == NULL, true, ME, "Already initialized");
+    amxp_timer_new(&s_csiSocketTimer, s_csiSocketTimerCb, NULL);
+    ASSERT_NOT_NULL(s_csiSocketTimer, false, ME, "Fail to create CSI socket timer");
+    return true;
+}
+
+void whm_mxl_csi_deinit(void) {
+    amxp_timer_delete(&s_csiSocketTimer);
+}
+
+static void s_startCsiSocketTimer() {
+    ASSERT_NOT_NULL(s_csiSocketTimer, , ME, "CSI socket timer not created");
+    amxp_timer_set_interval(s_csiSocketTimer, CSI_SOCKET_POLL_MS);
+    amxp_timer_start(s_csiSocketTimer, CSI_SOCKET_POLL_MS);
+}
+
+static void s_stopCsiSocketTimer() {
+    ASSERT_NOT_NULL(s_csiSocketTimer, , ME, "CSI socket timer not created");
+    amxp_timer_stop(s_csiSocketTimer);
+}
 
 /**
  * After adding a CSI client for a specific MAC address and monitor interval,
@@ -83,8 +157,7 @@ void mxl_rad_sendCsiStatsOverUnixSocket(wifi_csi_driver_nl_event_data_t* stats) 
             } else {
                 SAH_TRACEZ_ERROR(ME, "Recv data from peer failed: error:%d:%s", errno, strerror(errno));
             }
-            close(conn.clientfd);
-            conn.clientfd = -1;
+            s_closeCsiClient();
         }
     }
 }
@@ -328,6 +401,9 @@ swl_rc_ne whm_mxl_rad_sensingCmd(T_Radio* pRad) {
                 SAH_TRACEZ_ERROR(ME, "Create Unix socket failed");
             }
         }
+        if(conn.serverfd >= 0) {
+            s_startCsiSocketTimer();
+        }
         // Restart all existing csi clients on this radio
         s_enableExistingCsiClients(pRad, true);
     } else {
@@ -336,10 +412,8 @@ swl_rc_ne whm_mxl_rad_sensingCmd(T_Radio* pRad) {
         // Close and clean Unix socket when csi is disabled for all radios
         if(conn.serverfd != -1) {
             if(!s_sensingEnabledOnOtherRadios(pRad)) {
-                if(conn.clientfd != -1) {
-                    close(conn.clientfd);
-                    conn.clientfd = -1;
-                }
+                s_stopCsiSocketTimer();
+                s_closeCsiClient();
                 close(conn.serverfd);
                 conn.serverfd = -1;
                 unlink(CONFIG_MOD_WHM_CSI_SOCKET_PATH);

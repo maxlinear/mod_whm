@@ -258,6 +258,8 @@ bool whm_mxl_module_init(void) {
     whm_mxl_reconfMngr_initEvents();
     /* Init MLD */
     whm_mxl_mlo_initMld();
+    /* Create CSI socket poll timer */
+    whm_mxl_csi_init();
 
     /* init done */
     s_init = true;
@@ -275,6 +277,7 @@ bool whm_mxl_module_deInit(void) {
     ASSERT_TRUE(wld_unregisterVendor(s_vendor), false, ME, "unregister failure");
     mxl_rad_deleteZwDfsRadio();
     whm_mxl_mlo_deinitMld();
+    whm_mxl_csi_deinit();
     s_init = false;
     s_vendor = NULL;
     return true;
